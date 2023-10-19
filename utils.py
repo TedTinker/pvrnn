@@ -46,7 +46,7 @@ from math import exp, pi
 import numpy as np
 from time import sleep
 
-if(os.getcwd().split("/")[-1] != "maze"): os.chdir("maze")
+if(os.getcwd().split("/")[-1] != "pvrnn"): os.chdir("pvrnn")
 
 import torch
 from torch import nn 
@@ -113,9 +113,11 @@ parser.add_argument("--target_entropy",     type=float,      default = -2)      
 
 # Curiosity
 parser.add_argument("--curiosity",          type=str,        default = "none")     # Which kind of curiosity
-parser.add_argument("--naive_eta",          type=float,      default = 10)        # Scale curiosity
-parser.add_argument("--free_eta",           type=literal,    default = [10])        # Scale curiosity
 parser.add_argument("--dkl_max",            type=float,      default = 1)        
+parser.add_argument("--naive_eta",          type=float,      default = 10)        # Scale curiosity
+parser.add_argument("--target_naive_curiosity",type=float,   default = -2)        # Curiosity aim
+parser.add_argument("--free_eta",           type=literal,    default = [10])      # Scale curiosity
+parser.add_argument("--target_free_curiosity", type=literal, default = [-2])      # Curiosity aims
 
 # Memory buffer
 parser.add_argument('--capacity',           type=int,        default = 250)
@@ -133,7 +135,7 @@ parser.add_argument('--retro_step_cost',    type=float,      default = .99)
 # Saving data
 parser.add_argument('--keep_data',           type=int,        default = 1)
 
-parser.add_argument('--epochs_per_pred_list',type=int,        default = 1000000)#100)
+parser.add_argument('--epochs_per_pred_list',type=int,        default = 10000000)
 parser.add_argument('--agents_per_pred_list',type=int,        default = 1)
 parser.add_argument('--episodes_in_pred_list',type=int,       default = 1)
 parser.add_argument('--samples_per_pred',    type=int,        default = 1)
@@ -168,15 +170,15 @@ for arg in vars(default_args):
 default_args.steps_per_epoch = default_args.max_steps
 args.steps_per_epoch = args.max_steps
 
-def extend_list_to_match_length(target_list, length):
+def extend_list_to_match_length(target_list, length, value):
     while len(target_list) < length:
-        target_list.append(target_list[-1])
+        target_list.append(value)
     return target_list
 
 max_length = max(len(args.time_scales), len(args.beta), len(args.free_eta))
-args.time_scales = extend_list_to_match_length(args.time_scales, max_length)
-args.beta = extend_list_to_match_length(args.beta, max_length)
-args.free_eta = extend_list_to_match_length(args.free_eta, max_length)
+args.time_scales = extend_list_to_match_length(args.time_scales, max_length, 1)
+args.beta = extend_list_to_match_length(args.beta, max_length, 0)
+args.free_eta = extend_list_to_match_length(args.free_eta, max_length, 0)
 
 
 

@@ -36,8 +36,13 @@ class Agent:
         self.log_alpha = torch.tensor([0.0], requires_grad=True)
         self.alpha_opt = optim.Adam(params=[self.log_alpha], lr=args.alpha_lr) 
         
-        self.eta = 1
-        self.log_eta = torch.tensor([0.0], requires_grad=True)
+        self.naive_eta = 1
+        self.log_naive_eta = torch.tensor([0.0], requires_grad=True)
+        self.naive_eta_opt = optim.Adam(params=[self.log_naive_eta], lr=args.alpha_lr) 
+        
+        self.free_eta = [1] * len(args.time_scales)
+        self.log_free_eta = [torch.tensor([0.0], requires_grad=True)] * len(args.time_scales)
+        self.free_eta_opt = [optim.Adam(params=[self.log_free_eta[layer]], lr=args.alpha_lr) for layer in range(len(args.time_scales))]
         
         self.forward = Forward(args)
         self.forward_opt = optim.Adam(self.forward.parameters(), lr=args.forward_lr)
@@ -346,6 +351,7 @@ class Agent:
         accuracy_for_naive = image_loss + speed_loss
         accuracy            = accuracy_for_naive.mean()
         
+        # Consider changing how much prior/posterior change relative to complexity!
         complexity_for_free = [dkl(zq_mu, zq_std, zp_mu, zp_std).mean(-1).unsqueeze(-1) * masks for (zq_mu, zq_std, zp_mu, zp_std) in zip(zq_mus, zq_stds, zp_mus, zp_stds)]
         complexity          = sum([self.args.beta[layer] * complexity_for_free[layer].mean() for layer in range(len(self.args.time_scales))])        
                         
@@ -360,9 +366,10 @@ class Agent:
         # Get curiosity                  
         if(self.args.dkl_max != None):
             complexity_for_free = [torch.clamp(c, min = 0, max = self.args.dkl_max) for c in complexity_for_free]
-            #complexity_for_free = torch.log1p(complexity_for_free)
-        naive_curiosity = self.args.naive_eta * accuracy_for_naive  
-        free_curiosity = sum([self.args.free_eta[layer] * complexity_for_free[layer] for layer in range(len(self.args.time_scales))])
+            #complexity_for_free = torch.tanh(complexity_for_free) # Consider other clamps!
+        naive_curiosity = accuracy_for_naive * (self.args.naive_eta if self.args.naive_eta != None else self.naive_eta)
+        free_curiosities = [complexity_for_free[layer] * (self.args.free_eta[layer] if self.args.free_eta[layer] != None else self.free_eta[layer]) for layer in range(len(self.args.time_scales))]
+        free_curiosity = sum(free_curiosities)
         if(self.args.curiosity == "naive"):  curiosity = naive_curiosity
         elif(self.args.curiosity == "free"): curiosity = free_curiosity
         else:                                curiosity = torch.zeros(rewards.shape)
@@ -409,6 +416,38 @@ class Agent:
             self.alpha = torch.exp(self.log_alpha) 
         else:
             alpha_loss = None
+            
+            
+            
+        # Train eta
+        if(self.args.curiosity == "naive"):
+            eta_losses = []
+            if(self.args.naive_eta == None):
+                eta_loss = -(self.log_naive_eta * (naive_curiosity + self.args.target_naive_curiosity))*masks
+                eta_loss = eta_loss.mean() / masks.mean()
+                self.naive_eta_opt.zero_grad()
+                eta_loss.backward()
+                self.naive_eta_opt.step()
+                self.naive_eta = torch.exp(self.log_naive_eta) 
+            else:
+                eta_loss = None
+            eta_losses.append(eta_loss)
+        elif(self.args.curiosity == "free"):
+            eta_losses = []
+            for layer, eta in enumerate(self.args.free_eta):
+                if(eta == None):
+                    eta_loss = -(self.log_free_eta[layer] * (free_curiosities[layer] + self.args.target_free_curiosity[layer]))*masks
+                    eta_loss = eta_loss.mean() / masks.mean()
+                    self.free_eta_opt[layer].zero_grad()
+                    eta_loss.backward()
+                    self.free_eta_opt[layer].step()
+                    self.free_eta[layer] = torch.exp(self.log_free_eta[layer]) 
+                else:
+                    eta_loss = None
+                eta_losses.append(eta_loss)
+                
+        
+        # Consider training beta and gamma! 
                                     
             
         

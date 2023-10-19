@@ -204,50 +204,49 @@ class Forward(nn.Module): # PVRNN!
         self.args = default_args
                 
         self.obs_in = Obs_IN(args)
-        
         self.action_in = Action_IN(args)
         
         self.layers = len(args.time_scales)
-        zp_mu_layers = []
+        zp_mu_layers  = []
         zp_std_layers = []
-        zq_mu_layers = []
+        zq_mu_layers  = []
         zq_std_layers = []
-        mtrnn_layers = []
+        mtrnn_layers  = []
         
-        for i in range(self.layers):
+        for layer in range(self.layers):
         
             zp_mu_layers.append(nn.Sequential(
-                nn.Linear(args.hidden_size, args.hidden_size), 
+                nn.Linear(args.hidden_size + (args.hidden_size if layer == 0 else args.state_size), args.hidden_size), 
                 nn.PReLU(),
                 nn.Linear(args.hidden_size, args.state_size),
                 nn.Tanh()))
             zp_std_layers.append(nn.Sequential(
-                nn.Linear(args.hidden_size, args.hidden_size), 
+                nn.Linear(args.hidden_size + (args.hidden_size if layer == 0 else args.state_size), args.hidden_size), 
                 nn.PReLU(),
                 nn.Linear(args.hidden_size, args.state_size),
                 nn.Softplus()))
             
             zq_mu_layers.append(nn.Sequential(
-                nn.Linear(args.hidden_size + (args.hidden_size * obs_num if i == 0 else args.state_size), args.hidden_size), 
+                nn.Linear(args.hidden_size + (args.hidden_size * obs_num if layer == 0 else args.state_size), args.hidden_size), 
                 nn.PReLU(),
                 nn.Linear(args.hidden_size, args.state_size),
                 nn.Tanh()))
             zq_std_layers.append(nn.Sequential(
-                nn.Linear(args.hidden_size + (args.hidden_size * obs_num if i == 0 else args.state_size), args.hidden_size), 
+                nn.Linear(args.hidden_size + (args.hidden_size * obs_num if layer == 0 else args.state_size), args.hidden_size), 
                 nn.PReLU(),
                 nn.Linear(args.hidden_size, args.state_size),
                 nn.Softplus()))
             
             mtrnn_layers.append(MTRNN(
-                input_size = args.state_size + (args.hidden_size if i+1 != self.layers else 0),
+                input_size = args.state_size + (args.hidden_size if layer+1 != self.layers else 0),
                 hidden_size = args.hidden_size, 
-                time_constant = args.time_scales[i]))
+                time_constant = args.time_scales[layer]))
             
-        self.zp_mu_layers = nn.ModuleList(zp_mu_layers)
+        self.zp_mu_layers  = nn.ModuleList(zp_mu_layers)
         self.zp_std_layers = nn.ModuleList(zp_std_layers)
-        self.zq_mu_layers = nn.ModuleList(zq_mu_layers)
+        self.zq_mu_layers  = nn.ModuleList(zq_mu_layers)
         self.zq_std_layers = nn.ModuleList(zq_std_layers)
-        self.mtrnn_layers = nn.ModuleList(mtrnn_layers)
+        self.mtrnn_layers  = nn.ModuleList(mtrnn_layers)
         
         self.predict_obs = Obs_OUT(args)
         
@@ -256,23 +255,26 @@ class Forward(nn.Module): # PVRNN!
     def forward(self, rgbd, spe, prev_action, hq_m1_list = None):
         episodes, steps = episodes_steps(rgbd)
         if(hq_m1_list == None): hq_m1_list = [torch.zeros(episodes, 1, self.args.hidden_size)] * self.layers
+        
+        # Information goes up the layers.
         obs = self.obs_in(rgbd, spe)
         prev_action = self.action_in(prev_action)
-        zp_mus = [] ; zp_stds = [] 
+        zp_mus = [] ; zp_stds = [] ; zps = []
         zq_mus = [] ; zq_stds = [] ; zqs = []
         for layer in range(self.layers):
             relu_hq_m1 = F.relu(hq_m1_list[layer])
             if(layer == 0):
-                zp_mu, zp_std = var(relu_hq_m1, self.zp_mu_layers[layer],              self.zp_std_layers[layer],                           self.args)
+                zp_mu, zp_std = var(torch.cat((relu_hq_m1,      prev_action), dim=-1), self.zp_mu_layers[layer], self.zp_std_layers[layer], self.args)
                 zq_mu, zq_std = var(torch.cat((relu_hq_m1, obs, prev_action), dim=-1), self.zq_mu_layers[layer], self.zq_std_layers[layer], self.args)        
             else:
-                zp_mu, zp_std = var(relu_hq_m1, self.zp_mu_layers[layer],              self.zp_std_layers[layer],                           self.args)
+                zp_mu, zp_std = var(torch.cat((relu_hq_m1, zps[-1]),          dim=-1), self.zp_mu_layers[layer], self.zp_std_layers[layer], self.args)
                 zq_mu, zq_std = var(torch.cat((relu_hq_m1, zqs[-1]),          dim=-1), self.zq_mu_layers[layer], self.zq_std_layers[layer], self.args)        
             zp_mus.append(zp_mu) ; zp_stds.append(zp_std)
             zq_mus.append(zq_mu) ; zq_stds.append(zq_std)
-            zq = sample(zq_mu, zq_std)
-            zqs.append(zq)
+            zp = sample(zp_mu, zp_std) ; zps.append(zp)
+            zq = sample(zq_mu, zq_std) ; zqs.append(zq)
         
+        # Then understanding goes down the layers.
         hq_list = [None] * self.layers
         for layer in range(self.layers - 1, -1, -1):
             if(layer == self.layers - 1):
@@ -321,7 +323,6 @@ class Actor(nn.Module):
         self.args = args
         
         self.obs_in = Obs_IN(args)
-        
         self.action_in = Action_IN(args)
         
         self.h_in = nn.Sequential(
@@ -365,7 +366,6 @@ class Critic(nn.Module):
         self.args = args
         
         self.obs_in = Obs_IN(args)
-        
         self.action_in = Action_IN(args)
         
         self.h_in = nn.Sequential(

@@ -12,7 +12,7 @@ if(type(args.arg_list) != list): args.arg_list = json.loads(args.arg_list)
 combined = "___{}___".format("+".join(args.arg_list))    
 
 import os 
-try:    os.chdir("maze/bash")
+try:    os.chdir("pvrnn/bash")
 except: pass
 
 
@@ -74,7 +74,7 @@ add_this("hard",   {
     "hard_maze" :           True, 
     "maze_list" :           "\"['t']\"",   
     "epochs" :              "\"[500]\"",     
-    "time_scales" :         "\"[1, 1]\"",
+    "time_scales" :         "\"[1, .9, .75]\"",
     "image_size" :          8,
     "boxes_high" :          1,
     "max_steps" :           30, 
@@ -83,22 +83,23 @@ add_this("hard",   {
     "better_reward" :       "\"[(1,0),(1,10)]\"",
     "step_lim_punishment" : -2,
     "step_cost" :           .99, 
-    "naive_eta" :           1, #.75,
-    "free_eta" :            "\"[1, 0]\"", #.25, 
-    "beta" :                [[{"curiosity" : "free"}, "\"[.001, 0]\""]], 
+    "naive_eta" :           1, 
+    "free_eta" :            "\"[1, .1, .1]\"", 
+    "beta" :                [[{"curiosity" : "free"}, "\"[.001, .001, .001]\""]], 
     "target_entropy" :      [[{"curiosity" : "none"}, -2.5]],
     "agents_per_pos_list" : 36}) 
 
 add_this("many",   {
     "hard_maze" :           True, 
     "maze_list" :           "\"['1', '2', '3']\"", 
+    "time_scales" :         "\"[1, .9, .75]\"",
     "image_size" :          8,
     "max_steps" :           30, 
     "min_speed" :           0,
     "max_speed" :           200,
     "naive_eta" :           2, 
-    "free_eta" :            2,
-    "beta" :                [[{"curiosity" : "free"}, .01]], 
+    "free_eta" :            "\"[2, 1, 1]\"", 
+    "beta" :                [[{"curiosity" : "free"}, "\"[.01, .01, .01]\""]], 
     "agents_per_pos_list" : 36, 
     "epochs" :              "\"[500, 2000, 4000]\"", 
     "default_reward" :      "\"[(1,0)]\"", 
@@ -137,10 +138,10 @@ def all_like_this(this):
 
         
 if(__name__ == "__main__" and args.arg_list == []):
-    for key, value in slurm_dict.items(): print(key, ":", value,"\n")
-    #interesting = ["ef_hard_{}".format(i) for i in [13, 27, 40, 45]]
-    #for this in interesting:
-    #    print("{} : {}".format(this,slurm_dict[this]))
+    #for key, value in slurm_dict.items(): print(key, ":", value,"\n")
+    interesting = ["ef_many_{}".format(i) for i in [2]]
+    for this in interesting:
+        print("{} : {}".format(this,slurm_dict[this]))
 
 max_cpus = 36
 if(__name__ == "__main__" and args.arg_list != []):
@@ -177,7 +178,7 @@ if(__name__ == "__main__" and args.arg_list != []):
 {}
 #SBATCH --ntasks={}
 module load singularity
-singularity exec maze.sif python maze/main.py --comp {} --arg_name {} {} --agents $agents_per_job --previous_agents $previous_agents
+singularity exec maze.sif python pvrnn/main.py --comp {} --arg_name {} {} --agents $agents_per_job --previous_agents $previous_agents
 """.format(partition, max_cpus, args.comp, name, get_args(name))[2:])
             
 
@@ -187,7 +188,7 @@ singularity exec maze.sif python maze/main.py --comp {} --arg_name {} {} --agent
 """
 {}
 module load singularity
-singularity exec maze.sif python maze/finish_dicts.py --comp {} --arg_title {} --arg_name finishing_dictionaries
+singularity exec maze.sif python pvrnn/finish_dicts.py --comp {} --arg_title {} --arg_name finishing_dictionaries
 """.format(partition, args.comp, combined)[2:])
         
     with open("plotting.slurm", "w") as f:
@@ -195,7 +196,7 @@ singularity exec maze.sif python maze/finish_dicts.py --comp {} --arg_title {} -
 """
 {}
 module load singularity
-singularity exec maze.sif python maze/plotting.py --comp {} --arg_title {} --arg_name plotting
+singularity exec maze.sif python pvrnn/plotting.py --comp {} --arg_title {} --arg_name plotting
 """.format(partition, args.comp, combined)[2:])
         
     with open("plotting_pred.slurm", "w") as f:
@@ -203,7 +204,7 @@ singularity exec maze.sif python maze/plotting.py --comp {} --arg_title {} --arg
 """
 {}
 module load singularity
-singularity exec maze.sif python maze/plotting_pred.py --comp {} --arg_title {} --arg_name plotting_predictions
+singularity exec maze.sif python pvrnn/plotting_pred.py --comp {} --arg_title {} --arg_name plotting_predictions
 """.format(partition, args.comp, combined)[2:])
         
     with open("plotting_pos.slurm", "w") as f:
@@ -211,7 +212,7 @@ singularity exec maze.sif python maze/plotting_pred.py --comp {} --arg_title {} 
 """
 {}
 module load singularity
-singularity exec maze.sif python maze/plotting_pos.py --comp {} --arg_title {} --arg_name plotting_positions
+singularity exec maze.sif python pvrnn/plotting_pos.py --comp {} --arg_title {} --arg_name plotting_positions
 """.format(partition, args.comp, combined)[2:])
         
     with open("plotting_p_values.slurm", "w") as f:
@@ -219,7 +220,7 @@ singularity exec maze.sif python maze/plotting_pos.py --comp {} --arg_title {} -
 """
 {}
 module load singularity
-singularity exec maze.sif python maze/plotting_p_val.py --comp {} --arg_title {} --arg_name plotting_p_values
+singularity exec maze.sif python pvrnn/plotting_p_val.py --comp {} --arg_title {} --arg_name plotting_p_values
 """.format(partition, args.comp, combined)[2:])
         
     with open("combine_plots.slurm", "w") as f:
@@ -227,7 +228,7 @@ singularity exec maze.sif python maze/plotting_p_val.py --comp {} --arg_title {}
 """
 {}
 module load singularity
-singularity exec maze.sif python maze/combine_plots.py --comp {} --arg_title {} --arg_name combining_plots
+singularity exec maze.sif python pvrnn/combine_plots.py --comp {} --arg_title {} --arg_name combining_plots
 """.format(partition, args.comp, combined)[2:])
 # %%
 
