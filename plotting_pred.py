@@ -34,11 +34,11 @@ def hard_plotting_pred(complete_order, plot_dicts):
                         if(plot_dict["arg_name"] == arg_name): pred_lists = plot_dict["pred_lists"]["{}_{}_{}".format(agent, epoch, maze_name)] ; break 
                     for episode in range(episodes):
                         pred_list = pred_lists[episode]
-                        rows = len(pred_list) ; columns = 3 + 2 * plot_dict["args"].samples_per_pred
+                        rows = len(pred_list) ; columns = 3
                         fig, axs = plt.subplots(rows, columns, figsize = (columns * 2, rows * 2.5))
                         title = "Agent {}: Epoch {} (Maze {}), Episode {}".format( agent, epoch, maze_name, episode)
                         fig.suptitle(plot_dict["arg_title"] + "\n" + title, y = 1.1)
-                        for row, (action_name, (rgbd, spe), ((rgbd_mu_pred_p, pred_rgbd_p), (spe_mu_pred_p, pred_spe_p)), ((rgbd_mu_pred_q, pred_rgbd_q), (spe_mu_pred_q, pred_spe_q))) in enumerate(pred_list):
+                        for row, (action_name, (rgbd, spe), (pred_rgbd_p, pred_spe_p), (pred_rgbd_q, pred_spe_q)) in enumerate(pred_list):
                             for column in range(columns):
                                 ax = axs[row, column] ; ax.axis("off")
                                 if(row == 0 and column > 0): pass
@@ -49,30 +49,16 @@ def hard_plotting_pred(complete_order, plot_dicts):
                                         rgbd = fix_image_size(rgbd)
                                         ax.imshow(rgbd)
                                         ax.set_title("Step {}\nAction: {}\nSpeed {}".format(row, action_name, steps_per_step*round(spe.item())), fontsize = 12)
-                                    # ZP Mean
+                                    # ZP Sample
                                     elif(column == 1): 
-                                        rgbd_mu_pred_p = fix_image_size(rgbd_mu_pred_p)
-                                        ax.imshow(torch.sigmoid(rgbd_mu_pred_p)) 
-                                        ax.set_title("p(z) Mean\nSpeed {}".format(steps_per_step*round(spe_mu_pred_p.item())), fontsize = 12)
-                                    # ZP Samples
-                                    elif(column in [i+2 for i in range(plot_dict["args"].samples_per_pred)]):
-                                        pred_num = column - 2
-                                        pred = pred_rgbd_p[pred_num]
-                                        pred = fix_image_size(pred)
-                                        ax.imshow(torch.sigmoid(pred))
-                                        ax.set_title("p(z) Sample {}\nSpeed {}".format(pred_num+1, steps_per_step*round(pred_spe_p[pred_num].item())), fontsize = 12)
-                                    # ZQ Mean
-                                    elif(column == 2 + plot_dict["args"].samples_per_pred):
-                                        rgbd_mu_pred_q = fix_image_size(rgbd_mu_pred_q)
-                                        ax.imshow(torch.sigmoid(rgbd_mu_pred_q))
-                                        ax.set_title("q(z) Mean\nSpeed {}".format(steps_per_step*round(spe_mu_pred_q.item())), fontsize = 12)
-                                    # ZQ Samples
-                                    else:
-                                        pred_num = column - 3 - plot_dict["args"].samples_per_pred
-                                        pred = pred_rgbd_q[pred_num]
-                                        pred = fix_image_size(pred)
-                                        ax.imshow(torch.sigmoid(pred))
-                                        ax.set_title("q(z) Sample {}\nSpeed {}".format(pred_num+1, steps_per_step*round(pred_spe_q[pred_num].item())), fontsize = 12)
+                                        pred_rgbd_p = fix_image_size(pred_rgbd_p)
+                                        ax.imshow(torch.sigmoid(pred_rgbd_p)) 
+                                        ax.set_title("p(z)\nSpeed {}".format(steps_per_step*round(pred_spe_p.item())), fontsize = 12)
+                                    # ZQ Sample
+                                    elif(column == 2):
+                                        pred_rgbd_q = fix_image_size(pred_rgbd_q)
+                                        ax.imshow(torch.sigmoid(pred_rgbd_q))
+                                        ax.set_title("q(z)\nSpeed {}".format(steps_per_step*round(pred_spe_q.item())), fontsize = 12)
                         plt.savefig("{}/{}.png".format(arg_name, title), format = "png", bbox_inches = "tight", dpi=300)
                         plt.close()
                         

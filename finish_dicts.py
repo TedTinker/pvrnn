@@ -39,13 +39,27 @@ for folder in folders:
         
     for key in min_max_dict.keys():
         if(not key in ["args", "arg_title", "arg_name", "pred_lists", "pos_lists", "agent_lists", "spot_names", "steps"]):
-            minimum = None ; maximum = None
-            for min_max in min_max_dict[key]:
-                if(  minimum == None):      minimum = min_max[0]
-                elif(minimum > min_max[0]): minimum = min_max[0]
-                if(  maximum == None):      maximum = min_max[1]
-                elif(maximum < min_max[1]): maximum = min_max[1]
-            min_max_dict[key] = (minimum, maximum)
+            if(key == "free"):
+                min_maxes = []
+                print(min_max_dict[key])
+                for layer in min_max_dict[key]:
+                    minimum = None ; maximum = None
+                    print(layer)
+                    for min_max in layer:
+                        if(  minimum == None):      minimum = min_max[0]
+                        elif(minimum > min_max[0]): minimum = min_max[0]
+                        if(  maximum == None):      maximum = min_max[1]
+                        elif(maximum < min_max[1]): maximum = min_max[1]
+                    min_maxes.append((minimum, maximum))
+                min_max_dict[key] = min_maxes
+            else:
+                minimum = None ; maximum = None
+                for min_max in min_max_dict[key]:
+                    if(  minimum == None):      minimum = min_max[0]
+                    elif(minimum > min_max[0]): minimum = min_max[0]
+                    if(  maximum == None):      maximum = min_max[1]
+                    elif(maximum < min_max[1]): maximum = min_max[1]
+                min_max_dict[key] = (minimum, maximum)
 
     plot_dicts[folder] = plot_dict
     with open(folder + "/min_max_dict.pickle", "wb") as handle:

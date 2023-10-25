@@ -32,6 +32,28 @@ def get_quantiles(plot_dict, name, adjust_xs = True):
     quantile_dict["max"] = np.max(lists, 0)
     return(quantile_dict)
 
+def get_list_quantiles(list_of_lists, plot_dict):
+    quantile_dicts = []
+    for layer in range(len(list_of_lists[0])):
+        l = [l[layer] for l in list_of_lists]
+        xs = [i for i, x in enumerate(l[0]) if x != None]
+        lists = np.array(l, dtype=float)    
+        lists = lists[:,xs]
+        quantile_dict = {"xs" : [x * plot_dict["args"].keep_data for x in xs]}
+        quantile_dict["min"] = np.min(lists, 0)
+        quantile_dict["q10"] = np.quantile(lists, .1, 0)
+        quantile_dict["q20"] = np.quantile(lists, .2, 0)
+        quantile_dict["q30"] = np.quantile(lists, .3, 0)
+        quantile_dict["q40"] = np.quantile(lists, .4, 0)
+        quantile_dict["med"] = np.quantile(lists, .5, 0)
+        quantile_dict["q60"] = np.quantile(lists, .6, 0)
+        quantile_dict["q70"] = np.quantile(lists, .7, 0)
+        quantile_dict["q80"] = np.quantile(lists, .8, 0)
+        quantile_dict["q90"] = np.quantile(lists, .9, 0)
+        quantile_dict["max"] = np.max(lists, 0)
+        quantile_dicts.append(quantile_dict)
+    return(quantile_dicts)
+
 def get_logs(quantile_dict):
     for key in quantile_dict.keys():
         if(key != "xs"): quantile_dict[key] = np.log(quantile_dict[key])
@@ -350,12 +372,13 @@ def plots(plot_dicts, min_max_dict):
             
             # Curiosities
             naive_dict = get_quantiles(plot_dict, "naive")
-            free_dict = get_quantiles(plot_dict, "free")
-            min_max = many_min_max([min_max_dict["naive"], min_max_dict["free"]])
+            free_dicts = get_list_quantiles(plot_dict["free"], plot_dict)
+            min_max = many_min_max([min_max_dict["naive"]] + [free_min_max for free_min_max in min_max_dict["free"]])
             
             ax = axs[row_num,i] if len(plot_dicts) > 1 else axs[row_num] ; row_num += 1
             awesome_plot(ax, naive_dict, "green", "Naive")
-            awesome_plot(ax, free_dict, "red", "Free")
+            for layer, free_dict in enumerate(free_dicts):
+                awesome_plot(ax, free_dict, (1, layer/len(free_dicts), 0), "Free {}".format(layer+1))
             ax.set_ylabel("Curiosity")
             ax.set_xlabel("Epochs")
             ax.legend()
@@ -364,7 +387,8 @@ def plots(plot_dicts, min_max_dict):
             
             ax = axs[row_num,i] if len(plot_dicts) > 1 else axs[row_num] ; row_num += 1
             awesome_plot(ax, naive_dict, "green", "Naive", min_max)
-            awesome_plot(ax, free_dict, "red", "Free", min_max)
+            for layer, free_dict in enumerate(free_dicts):
+                awesome_plot(ax, free_dict, (1, layer/len(free_dicts), 0), "Free {}".format(layer+1), min_max)
             ax.set_ylabel("Curiosity")
             ax.set_xlabel("Epochs")
             ax.legend()
@@ -375,11 +399,12 @@ def plots(plot_dicts, min_max_dict):
             
             # Log Curiosities
             log_naive_dict = get_logs(naive_dict)
-            log_free_dict = get_logs(free_dict)
+            log_free_dicts = [get_logs(free_dict) for free_dict in free_dicts]
             
             ax = axs[row_num,i] if len(plot_dicts) > 1 else axs[row_num] ; row_num += 1
             awesome_plot(ax, log_naive_dict, "green", "log Naive")
-            awesome_plot(ax, log_free_dict, "red", "log Free")
+            for layer, log_free_dict in enumerate(log_free_dicts):
+                awesome_plot(ax, log_free_dict, (1, layer/len(free_dicts), 0), "log Free {}".format(layer+1))
             ax.set_ylabel("log Curiosity")
             ax.set_xlabel("Epochs")
             ax.legend()
@@ -390,7 +415,8 @@ def plots(plot_dicts, min_max_dict):
                 min_max = (log(min_max[0]), log(min_max[1]))
                 ax = axs[row_num,i] if len(plot_dicts) > 1 else axs[row_num] ; row_num += 1
                 awesome_plot(ax, log_naive_dict, "green", "log Naive", min_max)
-                awesome_plot(ax, log_free_dict, "red", "log Free", min_max)
+                for layer, log_free_dict in enumerate(log_free_dicts):
+                    awesome_plot(ax, log_free_dict, (1, layer/len(free_dicts), 0), "log Free {}".format(layer+1), min_max)
                 ax.set_ylabel("log Curiosity")
                 ax.set_xlabel("Epochs")
                 ax.legend()

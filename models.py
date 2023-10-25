@@ -103,7 +103,7 @@ class Obs_OUT(nn.Module):
                 
         self.gen_shape = (4, 2, 2) 
         self.rgbd_out_lin = nn.Sequential(
-            nn.Linear(2 * args.hidden_size, self.gen_shape[0] * self.gen_shape[1] * self.gen_shape[2]),
+            nn.Linear(4 * args.hidden_size, self.gen_shape[0] * self.gen_shape[1] * self.gen_shape[2]),
             nn.PReLU())
                 
         n_blocks = int(log2(args.image_size))
@@ -131,17 +131,17 @@ class Obs_OUT(nn.Module):
         self.rgbd_out = nn.Sequential(*modules)
         
         self.spe_out = nn.Sequential(
-            nn.Linear(2 * args.hidden_size, args.hidden_size), 
+            nn.Linear(4 * args.hidden_size, args.hidden_size), 
             nn.PReLU(),
             nn.Linear(args.hidden_size, args.hidden_size), 
             nn.PReLU(),
             nn.Linear(args.hidden_size, spe_size))
                 
-    def forward(self, action, h):
+    def forward(self, obs, action, h):
         episodes, steps = episodes_steps(action)
-        rgbd = self.rgbd_out_lin(torch.cat((h, action), dim=-1)).view((episodes, steps, self.gen_shape[0], self.gen_shape[1], self.gen_shape[2]))
+        rgbd = self.rgbd_out_lin(torch.cat((obs, action, h), dim=-1)).view((episodes, steps, self.gen_shape[0], self.gen_shape[1], self.gen_shape[2]))
         rgbd_pred = rnn_cnn(self.rgbd_out, rgbd).permute(0, 1, 3, 4, 2)
-        spe_pred  = self.spe_out(torch.cat((h, action), dim=-1))
+        spe_pred  = self.spe_out(torch.cat((obs, action, h), dim=-1))
         return(rgbd_pred, spe_pred)
     
     
@@ -196,49 +196,57 @@ class MTRNN(nn.Module):
         
         
 
-class Forward(nn.Module): # PVRNN!
+class Forward(nn.Module): 
     
     def __init__(self, args = default_args):
         super(Forward, self).__init__()
         
         self.args = default_args
+        self.layers = len(args.time_scales)
                 
         self.obs_in = Obs_IN(args)
         self.action_in = Action_IN(args)
         
-        self.layers = len(args.time_scales)
         zp_mu_layers  = []
         zp_std_layers = []
         zq_mu_layers  = []
         zq_std_layers = []
         mtrnn_layers  = []
         
-        for layer in range(self.layers):
+        for layer in range(self.layers): 
         
             zp_mu_layers.append(nn.Sequential(
-                nn.Linear(args.hidden_size + (args.hidden_size if layer == 0 else args.state_size), args.hidden_size), 
+                nn.Linear(args.hidden_size, args.hidden_size), 
                 nn.PReLU(),
                 nn.Linear(args.hidden_size, args.state_size),
                 nn.Tanh()))
             zp_std_layers.append(nn.Sequential(
-                nn.Linear(args.hidden_size + (args.hidden_size if layer == 0 else args.state_size), args.hidden_size), 
+                nn.Linear(args.hidden_size, args.hidden_size), 
                 nn.PReLU(),
                 nn.Linear(args.hidden_size, args.state_size),
                 nn.Softplus()))
             
             zq_mu_layers.append(nn.Sequential(
-                nn.Linear(args.hidden_size + (args.hidden_size * obs_num if layer == 0 else args.state_size), args.hidden_size), 
+                nn.Linear(args.hidden_size + \
+                    # rgbd, speed, action, or...
+                    (args.hidden_size * 3 if layer == 0 \
+                    # ...hq from lower layer
+                    else args.hidden_size), args.hidden_size), 
                 nn.PReLU(),
                 nn.Linear(args.hidden_size, args.state_size),
                 nn.Tanh()))
             zq_std_layers.append(nn.Sequential(
-                nn.Linear(args.hidden_size + (args.hidden_size * obs_num if layer == 0 else args.state_size), args.hidden_size), 
+                nn.Linear(args.hidden_size + \
+                    # rgbd, speed, action, or
+                    (args.hidden_size * 3 if layer == 0 \
+                    # hq from lower layer
+                    else args.hidden_size), args.hidden_size), 
                 nn.PReLU(),
                 nn.Linear(args.hidden_size, args.state_size),
                 nn.Softplus()))
             
             mtrnn_layers.append(MTRNN(
-                input_size = args.state_size + (args.hidden_size if layer+1 != self.layers else 0),
+                input_size = args.state_size + (args.hidden_size if layer + 1 < self.layers else 0),
                 hidden_size = args.hidden_size, 
                 time_constant = args.time_scales[layer]))
             
@@ -252,66 +260,71 @@ class Forward(nn.Module): # PVRNN!
         
         self.apply(init_weights)
         
-    def forward(self, rgbd, spe, prev_action, hq_m1_list = None):
-        episodes, steps = episodes_steps(rgbd)
-        if(hq_m1_list == None): hq_m1_list = [torch.zeros(episodes, 1, self.args.hidden_size)] * self.layers
-        
-        # Information goes up the layers.
-        obs = self.obs_in(rgbd, spe)
-        prev_action = self.action_in(prev_action)
-        zp_mus = [] ; zp_stds = [] ; zps = []
-        zq_mus = [] ; zq_stds = [] ; zqs = []
+    def p(self, hq_m1_list = None, episodes = 1):
+        if(hq_m1_list == None): 
+            hq_m1_list  = [torch.zeros(episodes, 1, self.args.hidden_size)] * self.layers
+            zp_mu_list  = [torch.zeros(episodes, 1, self.args.state_size)]  * self.layers
+            zp_std_list = [torch.ones( episodes, 1, self.args.state_size)]  * self.layers
+        else:
+            zp_mu_list = [] ; zp_std_list = []
+            for layer in range(self.layers):
+                zp_mu, zp_std = var(hq_m1_list[layer], self.zp_mu_layers[layer], self.zp_std_layers[layer], self.args)
+                zp_mu_list.append(zp_mu) ; zp_std_list.append(zp_std) 
+        zp_list = [] ; hp_list = []
         for layer in range(self.layers):
-            relu_hq_m1 = F.relu(hq_m1_list[layer])
-            if(layer == 0):
-                zp_mu, zp_std = var(torch.cat((relu_hq_m1,      prev_action), dim=-1), self.zp_mu_layers[layer], self.zp_std_layers[layer], self.args)
-                zq_mu, zq_std = var(torch.cat((relu_hq_m1, obs, prev_action), dim=-1), self.zq_mu_layers[layer], self.zq_std_layers[layer], self.args)        
-            else:
-                zp_mu, zp_std = var(torch.cat((relu_hq_m1, zps[-1]),          dim=-1), self.zp_mu_layers[layer], self.zp_std_layers[layer], self.args)
-                zq_mu, zq_std = var(torch.cat((relu_hq_m1, zqs[-1]),          dim=-1), self.zq_mu_layers[layer], self.zq_std_layers[layer], self.args)        
-            zp_mus.append(zp_mu) ; zp_stds.append(zp_std)
-            zq_mus.append(zq_mu) ; zq_stds.append(zq_std)
-            zp = sample(zp_mu, zp_std) ; zps.append(zp)
-            zq = sample(zq_mu, zq_std) ; zqs.append(zq)
-        
-        # Then understanding goes down the layers.
-        hq_list = [None] * self.layers
-        for layer in range(self.layers - 1, -1, -1):
-            if(layer == self.layers - 1):
-                hq, _ = self.mtrnn_layers[layer](zqs[layer],                                          hq_m1_list[layer])
-            else:
-                hq, _ = self.mtrnn_layers[layer](torch.cat((zqs[layer], hq_list[layer+1]), dim = -1), hq_m1_list[layer])
-            hq_list[layer] = hq
-            
-        return((zp_mus, zp_stds), (zq_mus, zq_stds), hq_list)
-        
-    def predict(self, action, z_mus, z_stds, h_m1_list, quantity = 1):
-        if(len(action.shape) == 2):        action =  action.unsqueeze(1)
-        if(len(h_m1_list[0].shape) == 2):  h_m1_list[0] = h_m1_list[0].unsqueeze(1)
-        z_mu = z_mus[0] ; z_std = z_stds[0]
-        h_m1 = h_m1_list[0] ; h_m1_up = h_m1_list[1] if self.layers > 1 else None
-        h, _ = self.mtrnn_layers[0](z_mu if h_m1_up == None else torch.cat([z_mu, h_m1_up], dim = -1), h_m1)       
-        action = self.action_in(action)
-        mu_pred = self.predict_obs(action, h)
-                
-        std_preds = []
-        for _ in range(quantity):
-            z = sample(z_mu, z_std)
-            h, _ = self.mtrnn_layers[0](z if h_m1_up == None else torch.cat([z, h_m1_up], dim = -1), h_m1)   
-            std_preds.append(self.predict_obs(action, h))
-        return(mu_pred, std_preds)
+            zp_list.append(sample(zp_mu_list[layer], zp_std_list[layer]))
+            if(layer+1 == self.layers): hp, _ = self.mtrnn_layers[layer](zp_list[layer], hq_m1_list[layer])
+            else:                       hp, _ = self.mtrnn_layers[layer](torch.cat([zp_list[layer], hq_m1_list[layer+1]], dim = -1), hq_m1_list[layer]) 
+            hp_list.append(hp)
+        return(zp_mu_list, zp_std_list, hp_list)
     
-    def forward_complete(self, obs, actions, quantity = 1):
-        episodes, steps = episodes_steps(obs)
-        hq_m1_list = [torch.zeros(episodes, 1, self.args.hidden_size)] * self.layers
-        zq_pred_list = [] ; zp_pred_list = [] ; hq_lists = []
-        for step in steps:
-            (zp_mus, zp_stds), (zq_mus, zq_stds), hq_list = self(obs[:, step], actions[:, step-1], hq_m1_list)
-            zq_pred_list.append(self.predict(actions[:, step], zq_mus, zq_stds, hq_m1_list, quantity))
-            zp_pred_list.append(self.predict(actions[:, step], zp_mus, zp_stds, hq_m1_list, quantity))
-            hq_lists.append(hq_list)
-            hq_m1_list = hq_list
-        return(zq_pred_list, zp_pred_list, hq_lists)
+    def q(self, rgbd, speed, action, hq_m1_list = None):
+        if(len(rgbd.shape)   == 4): rgbd   = rgbd.unsqueeze(1)
+        if(len(speed.shape)  == 2): speed  = speed.unsqueeze(1)
+        if(len(action.shape) == 2): action = action.unsqueeze(1)
+        episodes, steps = episodes_steps(rgbd)
+        if(hq_m1_list == None):     hq_m1_list = [torch.zeros(episodes, steps, self.args.hidden_size)] * self.layers
+        obs = self.obs_in(rgbd, speed)
+        action = self.action_in(action)
+        zq_mu_list = [] ; zq_std_list = [] ; zq_list = [] ; hq_list = []
+        for layer in range(self.layers):
+            if(layer == 0): zq_mu, zq_std = var(torch.cat((hq_m1_list[layer], obs, action),      dim=-1), self.zq_mu_layers[layer], self.zq_std_layers[layer], self.args)        
+            else:           zq_mu, zq_std = var(torch.cat((hq_m1_list[layer], hq_list[layer-1]), dim=-1), self.zq_mu_layers[layer], self.zq_std_layers[layer], self.args)  
+            zq_mu_list.append(zq_mu) ; zq_std_list.append(zq_std) ; zq_list.append(sample(zq_mu, zq_std))
+            if(layer+1 == self.layers): hq, _ = self.mtrnn_layers[layer](zq_list[layer], hq_m1_list[layer])
+            else:                       hq, _ = self.mtrnn_layers[layer](torch.cat([zq_list[layer], hq_m1_list[layer+1]], dim = -1), hq_m1_list[layer]) 
+            hq_list.append(hq)
+        return(zq_mu_list, zq_std_list, hq_list)
+        
+    def predict(self, rgbd, speed, action, h): 
+        if(len(rgbd.shape)   == 4): rgbd   = rgbd.unsqueeze(1)
+        if(len(speed.shape)  == 2): speed  = speed.unsqueeze(1)
+        if(len(action.shape) == 2): action = action.unsqueeze(1)
+        if(len(h[0].shape)   == 2): h[0]   = h[0].unsqueeze(1)
+        obs = self.obs_in(rgbd, speed)
+        action = self.action_in(action)
+        pred_rgbd, pred_speed = self.predict_obs(obs, action, h[0])
+        return(pred_rgbd, pred_speed)
+    
+    def forward(self, rgbd, speed, action):
+        episodes, steps = episodes_steps(rgbd)
+        zp_mu_lists = [] ; zp_std_lists = [] ; zp_rgbd_pred_list = [] ; zp_speed_pred_list = [] ; hp_lists = []
+        zq_mu_lists = [] ; zq_std_lists = [] ; zq_rgbd_pred_list = [] ; zq_speed_pred_list = [] ; hq_lists = [None]
+        for step in range(steps):
+            zp_mu_list, zp_std_list, hp_list = self.p(hq_lists[step], episodes = episodes)
+            zq_mu_list, zq_std_list, hq_list = self.q(rgbd[:,step], speed[:,step], action[:,step], hq_lists[step])
+            zp_rgbd_pred, zp_speed_pred = self.predict(rgbd[:,step], speed[:,step], action[:,step], hp_list)
+            zq_rgbd_pred, zq_speed_pred = self.predict(rgbd[:,step], speed[:,step], action[:,step], hq_list)
+            
+            zp_mu_lists.append(zp_mu_list) ; zp_std_lists.append(zp_std_list) ; hp_lists.append(hp_list)
+            zp_rgbd_pred_list.append(zp_rgbd_pred) ; zp_speed_pred_list.append(zp_speed_pred)
+            zq_mu_lists.append(zq_mu_list) ; zq_std_lists.append(zq_std_list) ; hq_lists.append(hq_list)
+            zq_rgbd_pred_list.append(zq_rgbd_pred) ; zq_speed_pred_list.append(zq_speed_pred)
+            
+        hq_lists[0] = [torch.zeros(episodes, 1, self.args.hidden_size)] * self.layers
+        return(
+            (zp_mu_lists, zp_std_lists, zp_rgbd_pred_list, zp_speed_pred_list, hp_lists), 
+            (zq_mu_lists, zq_std_lists, zq_rgbd_pred_list, zq_speed_pred_list, hq_lists))
 
 
 
@@ -323,16 +336,17 @@ class Actor(nn.Module):
         self.args = args
         
         self.obs_in = Obs_IN(args)
-        self.action_in = Action_IN(args)
         
-        self.h_in = nn.Sequential(
+        self.lin = nn.Sequential(
+            nn.PReLU(),
+            nn.Linear(3 * args.hidden_size, args.hidden_size),
+            nn.PReLU(),
+            nn.Linear(args.hidden_size, args.hidden_size),
+            nn.PReLU(),
+            nn.Linear(args.hidden_size, args.hidden_size),
+            nn.PReLU(),
+            nn.Linear(args.hidden_size, args.hidden_size),
             nn.PReLU())
-        
-        self.gru = nn.GRU(
-            input_size =  3 * args.hidden_size,
-            hidden_size = args.hidden_size,
-            batch_first = True)
-        
         self.mu = nn.Sequential(
             nn.Linear(args.hidden_size, action_size))
         self.std = nn.Sequential(
@@ -342,19 +356,18 @@ class Actor(nn.Module):
         self.apply(init_weights)
         self.to(args.device)
 
-    def forward(self, rgbd, spe, prev_action, h = None):
-        if(len(rgbd.shape) == 4): rgbd = rgbd.unsqueeze(1)
-        if(len(spe.shape) == 2):  spe =  spe.unsqueeze(1)
-        obs = self.obs_in(rgbd, spe)
-        prev_action = self.action_in(prev_action)
-        h, _ = self.gru(torch.cat((obs, prev_action), dim=-1), h)
-        relu_h = self.h_in(h)
-        mu, std = var(relu_h, self.mu, self.std, self.args)
+    def forward(self, rgbd, speed, h = None):
+        episodes, steps = episodes_steps(rgbd)
+        if(h == None): h = torch.zeros(episodes, steps, self.args.hidden_size)
+        else: h = h[0]
+        obs = self.obs_in(rgbd, speed)
+        x = self.lin(torch.cat([obs, h], dim = -1))
+        mu, std = var(x, self.mu, self.std, self.args)
         x = sample(mu, std)
         action = torch.tanh(x)
         log_prob = Normal(mu, std).log_prob(x) - torch.log(1 - action.pow(2) + 1e-6)
         log_prob = torch.mean(log_prob, -1).unsqueeze(-1)
-        return(action, log_prob, h)
+        return(action, log_prob, None)
     
     
     
@@ -384,88 +397,19 @@ class Critic(nn.Module):
         self.apply(init_weights)
         self.to(args.device)
 
-    def forward(self, rgbd, spe, action, h = None):
-        if(len(rgbd.shape) == 4): rgbd = rgbd.unsqueeze(1)
-        if(len(spe.shape) == 2):  spe =  spe.unsqueeze(1)
-        obs = self.obs_in(rgbd, spe)
+    def forward(self, rgbd, speed, action, h = None):
+        obs = self.obs_in(rgbd, speed)
         action = self.action_in(action)
         h, _ = self.gru(torch.cat((obs, action), dim=-1), h)
         Q = self.lin(self.h_in(h))
         return(Q, h)
-    
-    
-    
-class Actor_HQ(nn.Module):
-
-    def __init__(self, args = default_args):
-        super(Actor_HQ, self).__init__()
-        
-        self.args = args
-        
-        self.lin = nn.Sequential(
-            nn.PReLU(),
-            nn.Linear(args.hidden_size, args.hidden_size),
-            nn.PReLU(),
-            nn.Linear(args.hidden_size, args.hidden_size),
-            nn.PReLU(),
-            nn.Linear(args.hidden_size, args.hidden_size),
-            nn.PReLU(),
-            nn.Linear(args.hidden_size, args.hidden_size),
-            nn.PReLU())
-        self.mu = nn.Sequential(
-            nn.Linear(args.hidden_size, action_size))
-        self.std = nn.Sequential(
-            nn.Linear(args.hidden_size, action_size),
-            nn.Softplus())
-
-        self.apply(init_weights)
-        self.to(args.device)
-
-    def forward(self, h):
-        x = self.lin(h[0])
-        mu, std = var(x, self.mu, self.std, self.args)
-        x = sample(mu, std)
-        action = torch.tanh(x)
-        log_prob = Normal(mu, std).log_prob(x) - torch.log(1 - action.pow(2) + 1e-6)
-        log_prob = torch.mean(log_prob, -1).unsqueeze(-1)
-        return(action, log_prob, None)
-    
-    
-    
-class Critic_HQ(nn.Module):
-
-    def __init__(self, args = default_args):
-        super(Critic_HQ, self).__init__()
-        
-        self.args = args
-        
-        self.lin = nn.Sequential(
-            nn.PReLU(),
-            nn.Linear(args.hidden_size + action_size, args.hidden_size),
-            nn.PReLU(),
-            nn.Linear(args.hidden_size, args.hidden_size),
-            nn.PReLU(),
-            nn.Linear(args.hidden_size, args.hidden_size),
-            nn.PReLU(),
-            nn.Linear(args.hidden_size, args.hidden_size),
-            nn.PReLU(),
-            nn.Linear(args.hidden_size, 1))
-
-        self.apply(init_weights)
-        self.to(args.device)
-
-    def forward(self, h, action):
-        Q = self.lin(torch.cat((h, action), dim=-1))
-        return(Q, None)
     
 
 
 if __name__ == "__main__":
     
     args = default_args
-    args.dkl_rate = 1
-    args.image_size = 8
-    
+    e = 3 ; s = 3
     
     
     forward = Forward(args)
@@ -473,16 +417,26 @@ if __name__ == "__main__":
     print("\n\n")
     print(forward)
     print()
-    print(torch_summary(forward, ((3, 1, args.image_size, args.image_size, 4), (3, 1, spe_size), (3, 1, action_size))))
+    print(torch_summary(forward, ((e, s, args.image_size, args.image_size, 4), (e, s, spe_size), (e, s, action_size))))
     
     
-
+    
+    args.time_scales = [1, .85]
+    forward = Forward(args)
+    
+    print("\n\n")
+    print(forward)
+    print()
+    print(torch_summary(forward, ((e, s, args.image_size, args.image_size, 4), (e, s, spe_size), (e, s, action_size))))
+    
+    
+    
     actor = Actor(args)
     
     print("\n\n")
     print(actor)
     print()
-    print(torch_summary(actor, ((3, 1, args.image_size, args.image_size, 4), (3, 1, spe_size), (3, 1, action_size))))
+    print(torch_summary(actor, ((e, s, args.image_size, args.image_size, 4), (e, s, spe_size))))
     
     
     
@@ -491,24 +445,6 @@ if __name__ == "__main__":
     print("\n\n")
     print(critic)
     print()
-    print(torch_summary(critic, ((3, 1, args.image_size, args.image_size, 4), (3, 1, spe_size), (3, 1, action_size))))
-    
-    
-    
-    actor = Actor_HQ(args)
-    
-    print("\n\n")
-    print(actor)
-    print()
-    print(torch_summary(actor, ((3, 1, args.hidden_size))))
-    
-    
-    
-    critic = Critic_HQ(args)
-    
-    print("\n\n")
-    print(critic)
-    print()
-    print(torch_summary(critic, ((3, 1, args.hidden_size), (3, 1, action_size))))
+    print(torch_summary(critic, ((e, s, args.image_size, args.image_size, 4), (e, s, spe_size), (e, s, action_size))))
 
 # %%

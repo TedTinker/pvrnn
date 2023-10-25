@@ -73,7 +73,7 @@ def add_this(name, args):
 add_this("hard",   {
     "hard_maze" :           True, 
     "maze_list" :           "\"['t']\"",   
-    "epochs" :              "\"[500]\"",     
+    "epochs" :              "\"[1000]\"",     
     "time_scales" :         "\"[1, .9, .75]\"",
     "image_size" :          8,
     "boxes_high" :          1,
@@ -84,11 +84,11 @@ add_this("hard",   {
     "step_lim_punishment" : -2,
     "step_cost" :           .99, 
     "naive_eta" :           1, 
-    "free_eta" :            "\"[1, .1, .1]\"", 
-    "beta" :                [[{"curiosity" : "free"}, "\"[.001, .001, .001]\""]], 
-    "target_entropy" :      [[{"curiosity" : "none"}, -2.5]],
+    "free_eta" :            "\"[1, 0, 0]\"", 
+    "beta" :                [[{"curiosity" : "free"}, "\"[.001, 1, 1]\""]], 
+    "target_entropy" :      -2,
     "agents_per_pos_list" : 36}) 
-
+    
 add_this("many",   {
     "hard_maze" :           True, 
     "maze_list" :           "\"['1', '2', '3']\"", 
@@ -139,7 +139,7 @@ def all_like_this(this):
         
 if(__name__ == "__main__" and args.arg_list == []):
     #for key, value in slurm_dict.items(): print(key, ":", value,"\n")
-    interesting = ["ef_many_{}".format(i) for i in [2]]
+    interesting = ["ef_hard_{}".format(i+1) for i in range(36)]
     for this in interesting:
         print("{} : {}".format(this,slurm_dict[this]))
 

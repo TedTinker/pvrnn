@@ -10,10 +10,10 @@ from math import log
 from itertools import accumulate
 from copy import deepcopy
 
-from utils import default_args, dkl, print
-from hard_maze import Hard_Maze
-from hard_buffer import RecurrentReplayBuffer
-from harder_models import Forward, Actor, Actor_HQ, Critic, Critic_HQ
+from utils import default_args, detach_list, dkl, print
+from maze import Hard_Maze
+from buffer import RecurrentReplayBuffer
+from models import Forward, Actor, Critic
 
 action_size = 2
 
@@ -47,17 +47,17 @@ class Agent:
         self.forward = Forward(args)
         self.forward_opt = optim.Adam(self.forward.parameters(), lr=args.forward_lr)
                            
-        self.actor = Actor_HQ(args) if args.actor_hq else Actor(args)
+        self.actor = Actor(args)
         self.actor_opt = optim.Adam(self.actor.parameters(), lr=args.actor_lr) 
         
-        self.critic1 = Critic_HQ(args) if args.critic_hq else Critic(args)
+        self.critic1 = Critic(args)
         self.critic1_opt = optim.Adam(self.critic1.parameters(), lr=args.critic_lr)
-        self.critic1_target = Critic_HQ(args) if args.critic_hq else Critic(args)
+        self.critic1_target = Critic(args)
         self.critic1_target.load_state_dict(self.critic1.state_dict())
 
-        self.critic2 = Critic_HQ(args) if args.critic_hq else Critic(args)
+        self.critic2 = Critic(args)
         self.critic2_opt = optim.Adam(self.critic2.parameters(), lr=args.critic_lr)
-        self.critic2_target = Critic_HQ(args) if args.critic_hq else Critic(args)
+        self.critic2_target = Critic(args)
         self.critic2_target.load_state_dict(self.critic2.state_dict())
         
         self.train()
@@ -68,21 +68,21 @@ class Agent:
             "arg_title" : args.arg_title,
             "arg_name" : args.arg_name,
             "pred_lists" : {}, "pos_lists" : {}, 
-            "agent_lists" : {"forward" : Forward, "actor" : Actor_HQ if args.actor_hq else Actor, "critic" : Critic_HQ if args.critic_hq else Critic},
+            "agent_lists" : {"forward" : Forward, "actor" : Actor, "critic" : Critic},
             "rewards" : [], "spot_names" : [], "steps" : [],
             "accuracy" : [], "complexity" : [],
             "alpha" : [], "actor" : [], 
             "critic_1" : [], "critic_2" : [], 
             "extrinsic" : [], "intrinsic_curiosity" : [], 
             "intrinsic_entropy" : [], 
-            "naive" : [], "free" : []}
+            "naive" : [], "free" : [[] for _ in range(args.layers)]}
         
         
         
     def training(self, q):
         
-        self.pred_episodes_hq() if self.args.actor_hq else self.pred_episodes()
-        self.pos_episodes_hq() if self.args.actor_hq else self.pos_episodes()
+        self.pred_episodes()
+        self.pos_episodes()
         self.save_agent()
         while(True):
             cumulative_epochs = 0
@@ -91,51 +91,65 @@ class Agent:
                 cumulative_epochs += epochs
                 if(self.epochs < cumulative_epochs): self.maze_name = self.args.maze_list[j] ; break
             if(prev_maze_name != self.maze_name): 
-                self.pred_episodes_hq() if self.args.actor_hq else self.pred_episodes()
-                self.pos_episodes_hq() if self.args.actor_hq else self.pos_episodes()
+                self.pred_episodes()
+                self.pos_episodes()
                 self.maze.maze.stop()
                 self.maze = Hard_Maze(self.maze_name, args = self.args)
-                self.pred_episodes_hq() if self.args.actor_hq else self.pred_episodes()
-                self.pos_episodes_hq() if self.args.actor_hq else self.pos_episodes()
+                self.pred_episodes()
+                self.pos_episodes()
             self.training_episode()
             percent_done = str(self.epochs / sum(self.args.epochs))
             q.put((self.agent_num, percent_done))
             if(self.epochs >= sum(self.args.epochs)): break
-            if(self.epochs % self.args.epochs_per_pred_list == 0): self.pred_episodes_hq() if self.args.actor_hq else self.pred_episodes()
-            if(self.epochs % self.args.epochs_per_pos_list == 0): self.pos_episodes_hq() if self.args.actor_hq else self.pos_episodes()
+            if(self.epochs % self.args.epochs_per_pred_list == 0): self.pred_episodes()
+            if(self.epochs % self.args.epochs_per_pos_list == 0): self.pos_episodes()
             if(self.epochs % self.args.epochs_per_agent_list == 0): self.save_agent()
         self.plot_dict["rewards"] = list(accumulate(self.plot_dict["rewards"]))
-        self.pred_episodes_hq() if self.args.actor_hq else self.pred_episodes()
-        self.pos_episodes_hq() if self.args.actor_hq else self.pos_episodes()
+        self.pred_episodes()
+        self.pos_episodes()
         self.save_agent()
         
         self.min_max_dict = {key : [] for key in self.plot_dict.keys()}
+        self.min_max_dict["free"] = [] * self.args.layers
         for key in self.min_max_dict.keys():
             if(not key in ["args", "arg_title", "arg_name", "pred_lists", "pos_lists", "agent_lists", "spot_names", "steps"]):
-                minimum = None ; maximum = None 
-                l = self.plot_dict[key]
-                l = deepcopy(l)
-                l = [_ for _ in l if _ != None]
-                if(l != []):
-                    if(  minimum == None):  minimum = min(l)
-                    elif(minimum > min(l)): minimum = min(l)
-                    if(  maximum == None):  maximum = max(l) 
-                    elif(maximum < max(l)): maximum = max(l)
-                self.min_max_dict[key] = (minimum, maximum)
+                if(key == "free"):
+                    for l in self.plot_dict[key]:
+                        minimum = None ; maximum = None 
+                        l = deepcopy(l)
+                        l = [_ for _ in l if _ != None]
+                        if(l != []):
+                            if(  minimum == None):  minimum = min(l)
+                            elif(minimum > min(l)): minimum = min(l)
+                            if(  maximum == None):  maximum = max(l) 
+                            elif(maximum < max(l)): maximum = max(l)
+                        self.min_max_dict[key].append((minimum, maximum))
+                else:
+                    minimum = None ; maximum = None 
+                    l = self.plot_dict[key]
+                    l = deepcopy(l)
+                    l = [_ for _ in l if _ != None]
+                    if(l != []):
+                        if(  minimum == None):  minimum = min(l)
+                        elif(minimum > min(l)): minimum = min(l)
+                        if(  maximum == None):  maximum = max(l) 
+                        elif(maximum < max(l)): maximum = max(l)
+                    self.min_max_dict[key] = (minimum, maximum)
                 
                 
                 
     def save_agent(self):
         if(self.args.agents_per_agent_list != -1 and self.agent_num > self.args.agents_per_agent_list): return
         self.plot_dict["agent_lists"]["{}_{}".format(self.agent_num, self.epochs)] = deepcopy(self.state_dict())
-                
-                
-                
-    def step_in_episode(self, prev_a, h_actor, push, verbose):
+    
+    
+    
+    def step_in_episode(self, hq_m1, push, verbose):
         with torch.no_grad():
             o, s = self.maze.obs()
-            a, _, h_actor = self.actor(o, s, prev_a, h_actor)
-            action = torch.flatten(a).tolist()
+            _, _, hp = self.forward.p(hq_m1)
+            a, _, _ = self.actor(o, s, hp) ; action = torch.flatten(a).tolist()
+            _, _, hq = self.forward.q(o, s, a, hq_m1)
             r, wall_punishment, spot_name, done, action_name = self.maze.action(action[0], action[1], verbose)
             no, ns = self.maze.obs()
             if(push): 
@@ -144,116 +158,45 @@ class Agent:
                         retro_reward = r if r <= 0 else r * self.args.retro_step_cost ** (self.memory.time_ptr - i)
                         self.memory.r[self.memory.episode_ptr, i] += retro_reward
                 self.memory.push(o, s, a, r + wall_punishment, no, ns, done, done)
-        return(a, h_actor, r + wall_punishment, spot_name, done, action_name)
-    
-    
-    
-    def step_in_episode_hq(self, prev_a, h_q_m1, push, verbose):
-        with torch.no_grad():
-            o, s = self.maze.obs()
-            _, _, h_q = self.forward(o, s, prev_a, h_q_m1) # Issue here?
-            a, _, _ = self.actor(h_q)                      # Issue here?
-            action = torch.flatten(a).tolist()
-            r, wall_punishment, spot_name, done, action_name = self.maze.action(action[0], action[1], verbose)
-            no, ns = self.maze.obs()
-            if(push): 
-                if(done and self.args.retroactive_reward): 
-                    for i in range(self.memory.time_ptr):
-                        retro_reward = r if r <= 0 else r * self.args.retro_step_cost ** (self.memory.time_ptr - i)
-                        self.memory.r[self.memory.episode_ptr, i] += retro_reward
-                self.memory.push(o, s, a, r + wall_punishment, no, ns, done, done)
-                
-        return(a, h_q, r + wall_punishment, spot_name, done, action_name)
-    
-    
-    
+        return(a, hp, hq, r + wall_punishment, spot_name, done, action_name)
+            
+            
+            
     def pred_episodes(self):
         with torch.no_grad():
             if(self.args.agents_per_pred_list != -1 and self.agent_num > self.args.agents_per_pred_list): return
             pred_lists = []
             for episode in range(self.args.episodes_in_pred_list):
-                done = False ; prev_a = torch.zeros((1, 1, action_size))
-                h_actor = torch.zeros((1, 1, self.args.hidden_size))
-                h_q     = [torch.zeros((1, 1, self.args.hidden_size))] * len(self.args.time_scales)
+                done = False             
+                hq = [torch.zeros((1, 1, self.args.hidden_size))] * self.args.layers 
                 self.maze.begin()
                 o, s = self.maze.obs()
-                pred_list = [(None, (o.squeeze(0), s.squeeze(0)), ((None, None), (None, None)), ((None, None), (None, None)))]
+                pred_list = [(None, (o.squeeze(0), s.squeeze(0)), (None, None), (None, None))]
                 for step in range(self.args.max_steps):
                     if(not done): 
-                        o, s = self.maze.obs()
-                        a, h_actor, _, _, done, action_name = self.step_in_episode(prev_a, h_actor, push = False, verbose = False)
-                        (zp_mu, zp_std), (zq_mu, zq_std), h_q_p1 = self.forward(o, s, prev_a, h_q)
-                        (rgbd_mu_pred_p, pred_rgbd_p), (spe_mu_pred_p, pred_spe_p) = self.forward.predict(a, zp_mu, zp_std, h_q, quantity = self.args.samples_per_pred)
-                        (rgbd_mu_pred_q, pred_rgbd_q), (spe_mu_pred_q, pred_spe_q) = self.forward.predict(a, zq_mu, zq_std, h_q, quantity = self.args.samples_per_pred)
-                        pred_rgbd_p = [pred.squeeze(0).squeeze(0) for pred in pred_rgbd_p] ; pred_rgbd_q = [pred.squeeze(0).squeeze(0) for pred in pred_rgbd_q]
-                        pred_spe_p = [pred.squeeze(0).squeeze(0) for pred in pred_spe_p]   ; pred_spe_q = [pred.squeeze(0).squeeze(0) for pred in pred_spe_q]
-                        o, s = self.maze.obs()
+                        a, hp, hq_p1, _, _, done, action_name = self.step_in_episode(hq, push = False, verbose = False)
+                        pred_rgbd_p, pred_speed_p = self.forward.predict(o, s, a, hp)
+                        pred_rgbd_q, pred_speed_q = self.forward.predict(o, s, a, hq)
+                        no, ns = self.maze.obs()
                         pred_list.append((
-                            action_name, (o.squeeze(0), s.squeeze(0)), 
-                            ((rgbd_mu_pred_p.squeeze(0).squeeze(0), pred_rgbd_p), (spe_mu_pred_p.squeeze(0).squeeze(0), pred_spe_p)), 
-                            ((rgbd_mu_pred_q.squeeze(0).squeeze(0), pred_rgbd_q), (spe_mu_pred_q.squeeze(0).squeeze(0), pred_spe_q))))
-                        prev_a = a ; h_q = h_q_p1
-                pred_lists.append(pred_list)
-            self.plot_dict["pred_lists"]["{}_{}_{}".format(self.agent_num, self.epochs, self.maze.name)] = pred_lists
-            
-            
-            
-    def pred_episodes_hq(self):
-        with torch.no_grad():
-            if(self.args.agents_per_pred_list != -1 and self.agent_num > self.args.agents_per_pred_list): return
-            pred_lists = []
-            for episode in range(self.args.episodes_in_pred_list):
-                done = False ; prev_a = torch.zeros((1, 1, action_size))
-                h_q     = [torch.zeros((1, 1, self.args.hidden_size))] * len(self.args.time_scales)
-                self.maze.begin()
-                o, s = self.maze.obs()
-                pred_list = [(None, (o.squeeze(0), s.squeeze(0)), ((None, None), (None, None)), ((None, None), (None, None)))]
-                for step in range(self.args.max_steps):
-                    if(not done): 
-                        o, s = self.maze.obs()
-                        a, h_q_p1, _, _, done, action_name = self.step_in_episode_hq(prev_a, h_q, push = False, verbose = False)
-                        (zp_mu, zp_std), (zq_mu, zq_std), _ = self.forward(o, s, prev_a, h_q)
-                        mu_pred_p, std_pred_p = self.forward.predict(a, zp_mu, zp_std, h_q, quantity = self.args.samples_per_pred)
-                        mu_pred_q, std_pred_q = self.forward.predict(a, zq_mu, zq_std, h_q, quantity = self.args.samples_per_pred)
-                        std_rgbd_p = torch.cat([pred[0] for pred in std_pred_p], dim = -1) ; std_spe_p = torch.cat([pred[1] for pred in std_pred_p], dim = -1)
-                        std_rgbd_q = torch.cat([pred[0] for pred in std_pred_q], dim = -1) ; std_spe_q = torch.cat([pred[1] for pred in std_pred_q], dim = -1)
-                        o, s = self.maze.obs()
-                        pred_list.append((
-                            action_name, (o, s), 
-                            ((mu_pred_p[0], std_rgbd_p), (mu_pred_p[1], std_spe_p)), 
-                            ((mu_pred_q[0], std_rgbd_q), (mu_pred_q[1], std_spe_q))))
-                        prev_a = a ; h_q = h_q_p1
+                            action_name, (no, ns), 
+                            (pred_rgbd_p, pred_speed_p), (pred_rgbd_q, pred_speed_q)))
+                        hq = hq_p1 ; o, s = no, ns
                 pred_lists.append(pred_list)
             self.plot_dict["pred_lists"]["{}_{}_{}".format(self.agent_num, self.epochs, self.maze.name)] = pred_lists
     
-    
-    
+
+
     def pos_episodes(self):
         if(self.args.agents_per_pos_list != -1 and self.agent_num > self.args.agents_per_pos_list): return
         pos_lists = []
         for episode in range(self.args.episodes_in_pos_list):
-            done = False ; prev_a = torch.zeros((1, 1, action_size))
-            h_actor = torch.zeros((1, 1, self.args.hidden_size))
+            done = False 
+            hq = [torch.zeros((1, 1, self.args.hidden_size))] * self.args.layers 
             self.maze.begin()
             pos_list = [self.maze_name, self.maze.maze.get_pos_yaw_spe()[0]]
             for step in range(self.args.max_steps):
-                if(not done): prev_a, h_actor, _, _, done, _ = self.step_in_episode(prev_a, h_actor, push = False, verbose = False)
-                pos_list.append(self.maze.maze.get_pos_yaw_spe()[0])
-            pos_lists.append(pos_list)
-        self.plot_dict["pos_lists"]["{}_{}_{}".format(self.agent_num, self.epochs, self.maze.name)] = pos_lists
-        
-        
-        
-    def pos_episodes_hq(self):
-        if(self.args.agents_per_pos_list != -1 and self.agent_num > self.args.agents_per_pos_list): return
-        pos_lists = []
-        for episode in range(self.args.episodes_in_pos_list):
-            done = False ; prev_a = torch.zeros((1, 1, action_size))
-            h_q     = [torch.zeros((1, 1, self.args.hidden_size))] * len(self.args.time_scales)
-            self.maze.begin()
-            pos_list = [self.maze_name, self.maze.maze.get_pos_yaw_spe()[0]]
-            for step in range(self.args.max_steps):
-                if(not done): prev_a, h_q, _, _, done, _ = self.step_in_episode_hq(prev_a, h_q, push = False, verbose = False)
+                if(not done): a, hp, hq, _, _, done, _ = self.step_in_episode(hq, push = False, verbose = False)
                 pos_list.append(self.maze.maze.get_pos_yaw_spe()[0])
             pos_lists.append(pos_list)
         self.plot_dict["pos_lists"]["{}_{}_{}".format(self.agent_num, self.epochs, self.maze.name)] = pos_lists
@@ -261,8 +204,9 @@ class Agent:
     
     
     def training_episode(self, push = True, verbose = False):
-        done = False ; prev_a = torch.zeros((1, 1, 2)) ; cumulative_r = 0
-        h     = [torch.zeros((1, 1, self.args.hidden_size))] * len(self.args.time_scales) ; steps = 0
+        done = False ; steps = 0 ; cumulative_r = 0
+        hq = None
+        
         self.maze.begin()
         if(verbose): print("\n\n\n\n\nSTART!\n")
         
@@ -270,7 +214,7 @@ class Agent:
             self.steps += 1 
             if(not done):
                 steps += 1
-                prev_a, h, r, spot_name, done, _ = self.step_in_episode_hq(prev_a, h, push, verbose) if self.args.actor_hq else self.step_in_episode(prev_a, h, push, verbose)
+                a, hp, hq, r, spot_name, done, _ = self.step_in_episode(hq, push, verbose)
                 cumulative_r += r
                 
             if(self.steps % self.args.steps_per_epoch == 0):
@@ -290,7 +234,8 @@ class Agent:
                         self.plot_dict["intrinsic_curiosity"].append(ic)
                         self.plot_dict["intrinsic_entropy"].append(ie)
                         self.plot_dict["naive"].append(naive)
-                        self.plot_dict["free"].append(free)    
+                        for layer, f in enumerate(free):
+                            self.plot_dict["free"][layer].append(f)    
         
         self.plot_dict["steps"].append(steps)
         self.plot_dict["rewards"].append(r)
@@ -307,53 +252,39 @@ class Agent:
         self.epochs += 1
 
         rgbd, spe, actions, rewards, dones, masks = batch
-        actions = torch.cat([torch.zeros(actions[:,0].unsqueeze(1).shape), actions], dim = 1)
-        episodes = rewards.shape[0] ; steps = rewards.shape[1]
+        actions = torch.cat([torch.zeros(actions[:,0].unsqueeze(1).shape), actions], dim = 1)        
         
         #print("\n\n")
         #print("{}. rgbd: {}. spe: {}. actions: {}. rewards: {}. dones: {}. masks: {}.".format(
         #    self.agent_num, rgbd.shape, spe.shape, actions.shape, rewards.shape, dones.shape, masks.shape))
         #print("\n\n")
+        
                 
         
-
         # Train forward
-        h_qs = [[torch.zeros((episodes, 1, self.args.hidden_size)).to(rgbd.device)] * len(self.args.time_scales)]
-        zp_mus = []       ; zp_stds = []
-        zq_mus = []       ; zq_stds = []
-        zq_pred_rgbd = [] ; zq_pred_spe = []
-        for step in range(steps):
-            (zp_mu, zp_std), (zq_mu, zq_std), h_q_p1 = self.forward(rgbd[:, step], spe[:, step], actions[:, step], h_qs[-1])
-            _, std_pred_q = self.forward.predict(actions[:, step+1], zq_mu, zq_std, h_qs[-1], quantity = self.args.elbo_num)
-            std_rgbd_q = torch.cat([pred[0] for pred in std_pred_q], dim = -1) ; std_spe_q = torch.cat([pred[1] for pred in std_pred_q], dim = -1)
-            zp_mus.append(zp_mu) ; zp_stds.append(zp_std)
-            zq_mus.append(zq_mu) ; zq_stds.append(zq_std)
-            zq_pred_rgbd.append(std_rgbd_q) ; zq_pred_spe.append(std_spe_q)
-            h_qs.append(h_q_p1)
-        h_qs.append(h_qs.pop(0))
-        h_qs = [torch.cat([h_q[layer] for h_q in h_qs], dim = 1) for layer in range(len(self.args.time_scales))]
-        next_hqs = [h_q[:, 1:] for h_q in h_qs] ; hqs = [h_q[:, :-1] for h_q in h_qs]
+        (zp_mu_lists, zp_std_lists, zp_rgbd_pred_list, zp_speed_pred_list, hp_lists), \
+        (zq_mu_lists, zq_std_lists, zq_rgbd_pred_list, zp_speed_pred_list, hq_lists) = self.forward(rgbd[:,:-1], spe[:,:-1], actions[:,1:])
+                
+        h_lists = hq_lists # Is that right?
+        h_list = [torch.cat([h_list[layer] for h_list in h_lists], dim = 1) for layer in range(self.args.layers)]
+        h_list.append(h_list.pop(0))
+        next_h_list = [h[:, 1:] for h in h_list] ; h_list = [h[:, :-1] for h in h_list]
+                
+        zp_mu_list  = [torch.cat([zp_mu[layer]  for zp_mu  in zp_mu_lists],  dim = 1) for layer in range(self.args.layers)]
+        zp_std_list = [torch.cat([zp_std[layer] for zp_std in zp_std_lists], dim = 1) for layer in range(self.args.layers)]
+        zq_mu_list  = [torch.cat([zq_mu[layer]  for zq_mu  in zq_mu_lists],  dim = 1) for layer in range(self.args.layers)]
+        zq_std_list = [torch.cat([zq_std[layer] for zq_std in zq_std_lists], dim = 1) for layer in range(self.args.layers)]
+                
+        pred_rgbd = torch.cat(zp_rgbd_pred_list, dim = 1)
+        pred_spe  = torch.cat(zp_speed_pred_list, dim = 1)
 
-        def detach_list(l):
-            return([element.detach() for element in l])
-
-        zp_mus  = [torch.cat([zp_mu[layer]  for zp_mu  in zp_mus],  dim = 1) for layer in range(len(self.args.time_scales))]
-        zp_stds = [torch.cat([zp_std[layer] for zp_std in zp_stds], dim = 1) for layer in range(len(self.args.time_scales))]
-        zq_mus  = [torch.cat([zq_mu[layer]  for zq_mu  in zq_mus],  dim = 1) for layer in range(len(self.args.time_scales))]
-        zq_stds = [torch.cat([zq_std[layer] for zq_std in zq_stds], dim = 1) for layer in range(len(self.args.time_scales))]
-        zq_pred_rgbd = torch.cat(zq_pred_rgbd, dim = 1) ; zq_pred_spe = torch.cat(zq_pred_spe, dim = 1)
-        
-        next_rgbd_tiled = torch.tile(rgbd[:,1:], (1, 1, 1, 1, self.args.elbo_num))
-        next_spe_tiled  = torch.tile(spe[:,1:], (1, 1, self.args.elbo_num))
-
-        image_loss = F.binary_cross_entropy_with_logits(zq_pred_rgbd, next_rgbd_tiled, reduction = "none").mean((-1,-2,-3)).unsqueeze(-1) * masks / self.args.elbo_num
-        speed_loss = self.args.speed_scalar * F.mse_loss(zq_pred_spe, next_spe_tiled,  reduction = "none").mean(-1).unsqueeze(-1) * masks / self.args.elbo_num
+        image_loss = F.binary_cross_entropy_with_logits(pred_rgbd, rgbd[:,1:], reduction = "none").mean((-1,-2,-3)).unsqueeze(-1) * masks
+        speed_loss = self.args.speed_scalar * F.mse_loss(pred_spe, spe[:,1:],  reduction = "none").mean(-1).unsqueeze(-1) * masks
         accuracy_for_naive = image_loss + speed_loss
-        accuracy            = accuracy_for_naive.mean()
+        accuracy           = accuracy_for_naive.mean()
         
-        # Consider changing how much prior/posterior change relative to complexity!
-        complexity_for_free = [dkl(zq_mu, zq_std, zp_mu, zp_std).mean(-1).unsqueeze(-1) * masks for (zq_mu, zq_std, zp_mu, zp_std) in zip(zq_mus, zq_stds, zp_mus, zp_stds)]
-        complexity          = sum([self.args.beta[layer] * complexity_for_free[layer].mean() for layer in range(len(self.args.time_scales))])        
+        complexity_for_free = [dkl(zq_mu, zq_std, zp_mu, zp_std).mean(-1).unsqueeze(-1) * masks for (zq_mu, zq_std, zp_mu, zp_std) in zip(zq_mu_list, zq_std_list, zp_mu_list, zp_std_list)]
+        complexity          = sum([self.args.beta[layer] * complexity_for_free[layer].mean() for layer in range(self.args.layers)])        
                         
         self.forward_opt.zero_grad()
         (accuracy + complexity).backward()
@@ -368,7 +299,7 @@ class Agent:
             complexity_for_free = [torch.clamp(c, min = 0, max = self.args.dkl_max) for c in complexity_for_free]
             #complexity_for_free = torch.tanh(complexity_for_free) # Consider other clamps!
         naive_curiosity = accuracy_for_naive * (self.args.naive_eta if self.args.naive_eta != None else self.naive_eta)
-        free_curiosities = [complexity_for_free[layer] * (self.args.free_eta[layer] if self.args.free_eta[layer] != None else self.free_eta[layer]) for layer in range(len(self.args.time_scales))]
+        free_curiosities = [complexity_for_free[layer] * (self.args.free_eta[layer] if self.args.free_eta[layer] != None else self.free_eta[layer]) for layer in range(self.args.layers)]
         free_curiosity = sum(free_curiosities)
         if(self.args.curiosity == "naive"):  curiosity = naive_curiosity
         elif(self.args.curiosity == "free"): curiosity = free_curiosity
@@ -376,25 +307,25 @@ class Agent:
         extrinsic = torch.mean(rewards).item()
         intrinsic_curiosity = curiosity.mean().item()
         rewards += curiosity
-                
+                        
         
                 
         # Train critics
         with torch.no_grad():
-            new_actions, log_pis_next, _ = self.actor(detach_list(next_hqs)) if self.args.actor_hq else self.actor(rgbd[:,1:], spe[:,1:], actions[:,1:])
-            Q_target1_next, _ = self.critic1_target(detach_list(next_hqs), new_actions) if self.args.critic_hq else self.critic1_target(rgbd[:,1:], spe[:,1:], new_actions)
-            Q_target2_next, _ = self.critic2_target(detach_list(next_hqs), new_actions) if self.args.critic_hq else self.critic2_target(rgbd[:,1:], spe[:,1:], new_actions)
+            new_actions, log_pis_next, _ = self.actor(rgbd[:,1:], spe[:,1:], detach_list(next_h_list))
+            Q_target1_next, _ = self.critic1_target(rgbd[:,1:], spe[:,1:], new_actions)
+            Q_target2_next, _ = self.critic2_target(rgbd[:,1:], spe[:,1:], new_actions)
             Q_target_next = torch.min(Q_target1_next, Q_target2_next)
             if self.args.alpha == None: Q_targets = rewards + (self.args.GAMMA * (1 - dones) * (Q_target_next - self.alpha * log_pis_next))
             else:                       Q_targets = rewards + (self.args.GAMMA * (1 - dones) * (Q_target_next - self.args.alpha * log_pis_next))
         
-        Q_1, _ = self.critic1(detach_list(hqs), actions[:,1:]) if self.args.critic_hq else self.critic1(rgbd[:,:-1], spe[:,:-1], actions[:,1:])
+        Q_1, _ = self.critic1(rgbd[:,:-1], spe[:,:-1], actions[:,1:])
         critic1_loss = 0.5*F.mse_loss(Q_1*masks, Q_targets*masks)
         self.critic1_opt.zero_grad()
         critic1_loss.backward()
         self.critic1_opt.step()
         
-        Q_2, _ = self.critic2(detach_list(hqs), actions[:,1:]) if self.args.critic_hq else self.critic2(rgbd[:,:-1], spe[:,:-1], actions[:,1:])
+        Q_2, _ = self.critic2(rgbd[:,:-1], spe[:,:-1], actions[:,1:])
         critic2_loss = 0.5*F.mse_loss(Q_2*masks, Q_targets*masks)
         self.critic2_opt.zero_grad()
         critic2_loss.backward()
@@ -407,7 +338,7 @@ class Agent:
         
         # Train alpha
         if self.args.alpha == None:
-            _, log_pis, _ = self.actor(detach_list(hqs)) if self.args.actor_hq else self.actor(rgbd[:,:-1], spe[:,:-1], actions[:,:-1])
+            _, log_pis, _ = self.actor(rgbd[:,:-1], spe[:,:-1], detach_list(h_list))
             alpha_loss = -(self.log_alpha * (log_pis + self.target_entropy))*masks
             alpha_loss = alpha_loss.mean() / masks.mean()
             self.alpha_opt.zero_grad()
@@ -419,7 +350,7 @@ class Agent:
             
             
             
-        # Train eta
+        """# Train eta
         if(self.args.curiosity == "naive"):
             eta_losses = []
             if(self.args.naive_eta == None):
@@ -444,7 +375,7 @@ class Agent:
                     self.free_eta[layer] = torch.exp(self.log_free_eta[layer]) 
                 else:
                     eta_loss = None
-                eta_losses.append(eta_loss)
+                eta_losses.append(eta_loss)"""
                 
         
         # Consider training beta and gamma! 
@@ -455,7 +386,7 @@ class Agent:
         if self.epochs % self.args.d == 0:
             if self.args.alpha == None: alpha = self.alpha 
             else:                       alpha = self.args.alpha
-            new_actions, log_pis, _ = self.actor(detach_list(hqs)) if self.args.actor_hq else self.actor(rgbd[:,:-1], spe[:,:-1], actions[:,:-1])
+            new_actions, log_pis, _ = self.actor(rgbd[:,:-1], spe[:,:-1], detach_list(h_list))
 
             if self.args.action_prior == "normal":
                 loc = torch.zeros(action_size, dtype=torch.float64)
@@ -464,8 +395,8 @@ class Agent:
                 policy_prior_log_prrgbd = policy_prior.log_prob(new_actions).unsqueeze(-1)
             elif self.args.action_prior == "uniform":
                 policy_prior_log_prrgbd = 0.0
-            Q_1, _ = self.critic1(hqs, new_actions) if self.args.critic_hq else self.critic1(rgbd[:,:-1], spe[:,:-1], new_actions)
-            Q_2, _ = self.critic2(hqs, new_actions) if self.args.critic_hq else self.critic2(rgbd[:,:-1], spe[:,:-1], new_actions)
+            Q_1, _ = self.critic1(rgbd[:,:-1], spe[:,:-1], new_actions)
+            Q_2, _ = self.critic2(rgbd[:,:-1], spe[:,:-1], new_actions)
             Q = torch.min(Q_1, Q_2).mean(-1).unsqueeze(-1)
             intrinsic_entropy = torch.mean((alpha * log_pis)*masks).item()
             actor_loss = (alpha * log_pis - policy_prior_log_prrgbd - Q)*masks
@@ -494,10 +425,10 @@ class Agent:
         losses = np.array([[accuracy, complexity, alpha_loss, actor_loss, critic1_loss, critic2_loss]])
         
         naive_curiosity = naive_curiosity.mean().item()
-        free_curiosity = free_curiosity.mean().item()
-        if(free_curiosity == 0): free_curiosity = None
+        free_curiosities = [free_curiosity.mean().item() for free_curiosity in free_curiosities]
+        free_curiosities = [free_curiosity for free_curiosity in free_curiosities]
         
-        return(losses, extrinsic, intrinsic_curiosity, intrinsic_entropy, naive_curiosity, free_curiosity)
+        return(losses, extrinsic, intrinsic_curiosity, intrinsic_entropy, naive_curiosity, free_curiosities)
     
     
                      

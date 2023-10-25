@@ -11,9 +11,7 @@ from utils import args, folder, duration, estimate_total_duration, print
 print("\nname:\n{}".format(args.arg_name))
 print("\nagents: {}. previous_agents: {}.".format(args.agents, args.previous_agents))
 
-if(args.hard_maze): from hard_agent import Agent
-else:               from easy_agent import Agent
-
+from agent import Agent
 
 
 def train(q, i):
@@ -25,8 +23,7 @@ def train(q, i):
         pickle.dump(agent.plot_dict, handle)
     with open(folder + "/min_max_dict_{}.pickle".format(str(i).zfill(3)), "wb") as handle:
         pickle.dump(agent.min_max_dict, handle)
-
-
+        
 queue = Queue()
 
 processes = []
@@ -51,13 +48,14 @@ while any(process.is_alive() for process in processes) or not queue.empty():
         lowest = float(values[0])
         estimated_total = estimate_total_duration(lowest)
         if(estimated_total == "?:??:??"): to_do = "?:??:??"
-        else:                                   to_do = estimated_total - so_far
+        else:                             to_do = estimated_total - so_far
         values = [str(floor(100 * float(value))).ljust(3, " ") for value in values]
         for value in values:
             if(value != "100"): string += " " + value
             else:               hundreds += 1 
         if(hundreds > 0): string += " ##" + " 100" * hundreds
-        string = "{} ({} left):".format(so_far, to_do) + string
+        string_start = "{} ({} left): ".format(so_far, to_do) 
+        string = string_start + string
         if(hundreds == 0): string += " ##"
         string = string.rstrip() + "."
         print(string)

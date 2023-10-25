@@ -93,8 +93,6 @@ parser.add_argument('--boxes_high',         type=int,        default = 1)
 parser.add_argument('--hidden_size',        type=int,        default = 32)   
 parser.add_argument('--state_size',         type=int,        default = 32)
 parser.add_argument('--time_scales',        type=literal,    default = [1])
-parser.add_argument('--actor_hq',           type=literal,    default = True)
-parser.add_argument('--critic_hq',          type=literal,    default = False)
 parser.add_argument('--forward_lr',         type=float,      default = .01)
 parser.add_argument('--alpha_lr',           type=float,      default = .01) 
 parser.add_argument('--actor_lr',           type=float,      default = .01)
@@ -126,7 +124,6 @@ parser.add_argument('--capacity',           type=int,        default = 250)
 parser.add_argument('--epochs',             type=literal,    default = [1000])
 parser.add_argument('--steps_per_epoch',    type=int,        default = 10)
 parser.add_argument('--batch_size',         type=int,        default = 128)
-parser.add_argument('--elbo_num',           type=int,        default = 1)
 parser.add_argument('--GAMMA',              type=float,      default = .9)
 parser.add_argument("--d",                  type=int,        default = 2)        # Delay to train actors
 parser.add_argument('--retroactive_reward', type=literal,    default = False)
@@ -138,7 +135,6 @@ parser.add_argument('--keep_data',           type=int,        default = 1)
 parser.add_argument('--epochs_per_pred_list',type=int,        default = 10000000)
 parser.add_argument('--agents_per_pred_list',type=int,        default = 1)
 parser.add_argument('--episodes_in_pred_list',type=int,       default = 1)
-parser.add_argument('--samples_per_pred',    type=int,        default = 1)
 
 parser.add_argument('--epochs_per_pos_list', type=int,        default = 100)
 parser.add_argument('--agents_per_pos_list', type=int,        default = -1)
@@ -179,6 +175,8 @@ max_length = max(len(args.time_scales), len(args.beta), len(args.free_eta))
 args.time_scales = extend_list_to_match_length(args.time_scales, max_length, 1)
 args.beta = extend_list_to_match_length(args.beta, max_length, 0)
 args.free_eta = extend_list_to_match_length(args.free_eta, max_length, 0)
+default_args.layers = len(default_args.time_scales)
+args.layers = len(args.time_scales)
 
 
 
@@ -274,6 +272,11 @@ class Ted_Conv2d(nn.Module):
         y = []
         for Conv2d in self.Conv2ds: y.append(Conv2d(x)) 
         return(torch.cat(y, dim = -3))
+    
+    
+    
+def detach_list(l):
+    return([element.detach() for element in l])
 
 
     
