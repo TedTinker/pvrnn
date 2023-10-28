@@ -122,12 +122,12 @@ parser.add_argument('--capacity',           type=int,        default = 250)
 
 # Training
 parser.add_argument('--epochs',             type=literal,    default = [1000])
-parser.add_argument('--steps_per_epoch',    type=int,        default = 10)
 parser.add_argument('--batch_size',         type=int,        default = 128)
 parser.add_argument('--GAMMA',              type=float,      default = .9)
 parser.add_argument("--d",                  type=int,        default = 2)        # Delay to train actors
 parser.add_argument('--retroactive_reward', type=literal,    default = False)
 parser.add_argument('--retro_step_cost',    type=float,      default = .99)
+parser.add_argument('--hp_predict',         type=bool,       default = True)
 
 # Saving data
 parser.add_argument('--keep_data',           type=int,        default = 1)

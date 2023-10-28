@@ -144,12 +144,12 @@ class Agent:
     
     
     
-    def step_in_episode(self, hq_m1, push, verbose):
+    def step_in_episode(self, prev_action, hq_m1, push, verbose):
         with torch.no_grad():
             o, s = self.maze.obs()
-            _, _, hp = self.forward.p(hq_m1)
+            _, _, hp = self.forward.p(prev_action, hq_m1)
+            _, _, hq = self.forward.q(prev_action, o, s, hq_m1)
             a, _, _ = self.actor(o, s, hp) ; action = torch.flatten(a).tolist()
-            _, _, hq = self.forward.q(o, s, a, hq_m1)
             r, wall_punishment, spot_name, done, action_name = self.maze.action(action[0], action[1], verbose)
             no, ns = self.maze.obs()
             if(push): 
@@ -167,21 +167,28 @@ class Agent:
             if(self.args.agents_per_pred_list != -1 and self.agent_num > self.args.agents_per_pred_list): return
             pred_lists = []
             for episode in range(self.args.episodes_in_pred_list):
-                done = False             
+                done = False        
+                prev_action = torch.zeros((1, 1, 2))     
                 hq = [torch.zeros((1, 1, self.args.hidden_size))] * self.args.layers 
                 self.maze.begin()
+                
                 o, s = self.maze.obs()
-                pred_list = [(None, (o.squeeze(0), s.squeeze(0)), (None, None), (None, None))]
+                pred_list = [(None, (o, s), (None, None))]
                 for step in range(self.args.max_steps):
                     if(not done): 
-                        a, hp, hq_p1, _, _, done, action_name = self.step_in_episode(hq, push = False, verbose = False)
-                        pred_rgbd_p, pred_speed_p = self.forward.predict(o, s, a, hp)
-                        pred_rgbd_q, pred_speed_q = self.forward.predict(o, s, a, hq)
+                        a, hp, hq_p1, _, _, done, action_name = self.step_in_episode(prev_action, hq, push = False, verbose = False)
                         no, ns = self.maze.obs()
+                        pred_rgbd_p, pred_speed_p = self.forward.predict(a, hp) # Off by one error here?
                         pred_list.append((
                             action_name, (no, ns), 
-                            (pred_rgbd_p, pred_speed_p), (pred_rgbd_q, pred_speed_q)))
-                        hq = hq_p1 ; o, s = no, ns
+                            (pred_rgbd_p, pred_speed_p)))
+                        prev_action = a ; hq = hq_p1 
+                #o, s = self.maze.obs()
+                #_, _, hp = self.forward.p(prev_action, hq)
+                #pred_rgbd_p, pred_speed_p = self.forward.predict(hp)
+                #pred_list.append((
+                #    action_name, (o, s), 
+                #    (pred_rgbd_p, pred_speed_p)))
                 pred_lists.append(pred_list)
             self.plot_dict["pred_lists"]["{}_{}_{}".format(self.agent_num, self.epochs, self.maze.name)] = pred_lists
     
@@ -192,11 +199,12 @@ class Agent:
         pos_lists = []
         for episode in range(self.args.episodes_in_pos_list):
             done = False 
+            prev_action = torch.zeros((1, 1, 2))  
             hq = [torch.zeros((1, 1, self.args.hidden_size))] * self.args.layers 
             self.maze.begin()
             pos_list = [self.maze_name, self.maze.maze.get_pos_yaw_spe()[0]]
             for step in range(self.args.max_steps):
-                if(not done): a, hp, hq, _, _, done, _ = self.step_in_episode(hq, push = False, verbose = False)
+                if(not done): prev_action, hp, hq, _, _, done, _ = self.step_in_episode(prev_action, hq, push = False, verbose = False)
                 pos_list.append(self.maze.maze.get_pos_yaw_spe()[0])
             pos_lists.append(pos_list)
         self.plot_dict["pos_lists"]["{}_{}_{}".format(self.agent_num, self.epochs, self.maze.name)] = pos_lists
@@ -205,6 +213,7 @@ class Agent:
     
     def training_episode(self, push = True, verbose = False):
         done = False ; steps = 0 ; cumulative_r = 0
+        prev_action = torch.zeros((1, 1, 2))
         hq = None
         
         self.maze.begin()
@@ -214,7 +223,7 @@ class Agent:
             self.steps += 1 
             if(not done):
                 steps += 1
-                a, hp, hq, r, spot_name, done, _ = self.step_in_episode(hq, push, verbose)
+                prev_action, hp, hq, r, spot_name, done, _ = self.step_in_episode(prev_action, hq, push, verbose)
                 cumulative_r += r
                 
             if(self.steps % self.args.steps_per_epoch == 0):
@@ -252,7 +261,8 @@ class Agent:
         self.epochs += 1
 
         rgbd, spe, actions, rewards, dones, masks = batch
-        actions = torch.cat([torch.zeros(actions[:,0].unsqueeze(1).shape), actions], dim = 1)        
+        actions = torch.cat([torch.zeros(actions[:,0].unsqueeze(1).shape), actions], dim = 1)    
+        all_masks = torch.cat([torch.ones(masks.shape[0], 1, 1), masks], dim = 1)    
         
         #print("\n\n")
         #print("{}. rgbd: {}. spe: {}. actions: {}. rewards: {}. dones: {}. masks: {}.".format(
@@ -263,7 +273,7 @@ class Agent:
         
         # Train forward
         (zp_mu_lists, zp_std_lists, zp_rgbd_pred_list, zp_speed_pred_list, hp_lists), \
-        (zq_mu_lists, zq_std_lists, zq_rgbd_pred_list, zp_speed_pred_list, hq_lists) = self.forward(rgbd[:,:-1], spe[:,:-1], actions[:,1:])
+        (zq_mu_lists, zq_std_lists,                                        hq_lists) = self.forward(actions, rgbd[:,:-1], spe[:,:-1])
                 
         h_lists = hq_lists # Is that right?
         h_list = [torch.cat([h_list[layer] for h_list in h_lists], dim = 1) for layer in range(self.args.layers)]
@@ -275,13 +285,14 @@ class Agent:
         zq_mu_list  = [torch.cat([zq_mu[layer]  for zq_mu  in zq_mu_lists],  dim = 1) for layer in range(self.args.layers)]
         zq_std_list = [torch.cat([zq_std[layer] for zq_std in zq_std_lists], dim = 1) for layer in range(self.args.layers)]
                 
-        pred_rgbd = torch.cat(zp_rgbd_pred_list, dim = 1)
+        pred_rgbd = torch.cat(zp_rgbd_pred_list,  dim = 1)
         pred_spe  = torch.cat(zp_speed_pred_list, dim = 1)
 
-        image_loss = F.binary_cross_entropy_with_logits(pred_rgbd, rgbd[:,1:], reduction = "none").mean((-1,-2,-3)).unsqueeze(-1) * masks
-        speed_loss = self.args.speed_scalar * F.mse_loss(pred_spe, spe[:,1:],  reduction = "none").mean(-1).unsqueeze(-1) * masks
+        image_loss = F.binary_cross_entropy_with_logits(pred_rgbd, rgbd[:,1:], reduction = "none").mean((-1,-2,-3)).unsqueeze(-1) * masks # all_masks
+        speed_loss = self.args.speed_scalar * F.mse_loss(pred_spe, spe[:,1:],  reduction = "none").mean(-1).unsqueeze(-1) * masks # all_masks
         accuracy_for_naive = image_loss + speed_loss
         accuracy           = accuracy_for_naive.mean()
+        #accuracy_for_naive = accuracy_for_naive[:,1:]
         
         complexity_for_free = [dkl(zq_mu, zq_std, zp_mu, zp_std).mean(-1).unsqueeze(-1) * masks for (zq_mu, zq_std, zp_mu, zp_std) in zip(zq_mu_list, zq_std_list, zp_mu_list, zp_std_list)]
         complexity          = sum([self.args.beta[layer] * complexity_for_free[layer].mean() for layer in range(self.args.layers)])        
