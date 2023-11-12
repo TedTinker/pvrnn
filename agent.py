@@ -149,7 +149,8 @@ class Agent:
             o, s = self.maze.obs()
             _, _, hp = self.forward.p(prev_action, hq_m1)
             _, _, hq = self.forward.q(prev_action, o, s, hq_m1)
-            a, _, _ = self.actor(o, s, hp) ; action = torch.flatten(a).tolist()
+            a, _, _ = self.actor(hq) 
+            action = torch.flatten(a).tolist()
             r, wall_punishment, spot_name, done, action_name = self.maze.action(action[0], action[1], verbose)
             no, ns = self.maze.obs()
             if(push): 
@@ -173,22 +174,16 @@ class Agent:
                 self.maze.begin()
                 
                 o, s = self.maze.obs()
-                pred_list = [(None, (o, s), (None, None))]
+                pred_list = [(None, (o, s), (None, None), (None, None))]
                 for step in range(self.args.max_steps):
                     if(not done): 
-                        a, hp, hq_p1, _, _, done, action_name = self.step_in_episode(prev_action, hq, push = False, verbose = False)
+                        a, hp_p1, hq_p1, _, _, done, action_name = self.step_in_episode(prev_action, hq, push = False, verbose = False)
                         no, ns = self.maze.obs()
-                        pred_rgbd_p, pred_speed_p = self.forward.predict(a, hp) # Off by one error here?
+                        pred_rgbd_p, pred_speed_p = self.forward.predict(a, hp_p1) 
+                        pred_rgbd_q, pred_speed_q = self.forward.predict(a, hq_p1) 
                         pred_list.append((
-                            action_name, (no, ns), 
-                            (pred_rgbd_p, pred_speed_p)))
+                            action_name, (no, ns), (pred_rgbd_p, pred_speed_p), (pred_rgbd_q, pred_speed_q)))
                         prev_action = a ; hq = hq_p1 
-                #o, s = self.maze.obs()
-                #_, _, hp = self.forward.p(prev_action, hq)
-                #pred_rgbd_p, pred_speed_p = self.forward.predict(hp)
-                #pred_list.append((
-                #    action_name, (o, s), 
-                #    (pred_rgbd_p, pred_speed_p)))
                 pred_lists.append(pred_list)
             self.plot_dict["pred_lists"]["{}_{}_{}".format(self.agent_num, self.epochs, self.maze.name)] = pred_lists
     
@@ -262,7 +257,8 @@ class Agent:
 
         rgbd, spe, actions, rewards, dones, masks = batch
         actions = torch.cat([torch.zeros(actions[:,0].unsqueeze(1).shape), actions], dim = 1)    
-        all_masks = torch.cat([torch.ones(masks.shape[0], 1, 1), masks], dim = 1)    
+        all_masks = torch.cat([torch.ones(masks.shape[0], 1, 1), masks], dim = 1)   
+        episodes = rewards.shape[0] ; steps = rewards.shape[1] 
         
         #print("\n\n")
         #print("{}. rgbd: {}. spe: {}. actions: {}. rewards: {}. dones: {}. masks: {}.".format(
@@ -272,21 +268,17 @@ class Agent:
                 
         
         # Train forward
-        (zp_mu_lists, zp_std_lists, zp_rgbd_pred_list, zp_speed_pred_list, hp_lists), \
-        (zq_mu_lists, zq_std_lists,                                        hq_lists) = self.forward(actions, rgbd[:,:-1], spe[:,:-1])
-                
-        h_lists = hq_lists # Is that right?
-        h_list = [torch.cat([h_list[layer] for h_list in h_lists], dim = 1) for layer in range(self.args.layers)]
-        h_list.append(h_list.pop(0))
-        next_h_list = [h[:, 1:] for h in h_list] ; h_list = [h[:, :-1] for h in h_list]
+        (zp_mu_lists, zp_std_lists,                                        hp_lists), \
+        (zq_mu_lists, zq_std_lists, zq_rgbd_pred_list, zq_speed_pred_list, hq_lists) = self.forward(actions, rgbd[:,:-1], spe[:,:-1])
+        full_h_list = [h for h in hq_lists] ; h_list = [h[:, :-1] for h in hq_lists]
                 
         zp_mu_list  = [torch.cat([zp_mu[layer]  for zp_mu  in zp_mu_lists],  dim = 1) for layer in range(self.args.layers)]
         zp_std_list = [torch.cat([zp_std[layer] for zp_std in zp_std_lists], dim = 1) for layer in range(self.args.layers)]
         zq_mu_list  = [torch.cat([zq_mu[layer]  for zq_mu  in zq_mu_lists],  dim = 1) for layer in range(self.args.layers)]
         zq_std_list = [torch.cat([zq_std[layer] for zq_std in zq_std_lists], dim = 1) for layer in range(self.args.layers)]
                 
-        pred_rgbd = torch.cat(zp_rgbd_pred_list,  dim = 1)
-        pred_spe  = torch.cat(zp_speed_pred_list, dim = 1)
+        pred_rgbd = torch.cat(zq_rgbd_pred_list,  dim = 1)
+        pred_spe  = torch.cat(zq_speed_pred_list, dim = 1)
 
         image_loss = F.binary_cross_entropy_with_logits(pred_rgbd, rgbd[:,1:], reduction = "none").mean((-1,-2,-3)).unsqueeze(-1) * masks # all_masks
         speed_loss = self.args.speed_scalar * F.mse_loss(pred_spe, spe[:,1:],  reduction = "none").mean(-1).unsqueeze(-1) * masks # all_masks
@@ -323,10 +315,12 @@ class Agent:
                 
         # Train critics
         with torch.no_grad():
-            new_actions, log_pis_next, _ = self.actor(rgbd[:,1:], spe[:,1:], detach_list(next_h_list))
-            Q_target1_next, _ = self.critic1_target(rgbd[:,1:], spe[:,1:], new_actions)
-            Q_target2_next, _ = self.critic2_target(rgbd[:,1:], spe[:,1:], new_actions)
+            new_actions, log_pis_next, _ = self.actor(detach_list(full_h_list))
+            Q_target1_next, _ = self.critic1_target(rgbd, spe, new_actions)
+            Q_target2_next, _ = self.critic2_target(rgbd, spe, new_actions)
+            log_pis_next = log_pis_next[:,1:]
             Q_target_next = torch.min(Q_target1_next, Q_target2_next)
+            Q_target_next = Q_target_next[:,1:]
             if self.args.alpha == None: Q_targets = rewards + (self.args.GAMMA * (1 - dones) * (Q_target_next - self.alpha * log_pis_next))
             else:                       Q_targets = rewards + (self.args.GAMMA * (1 - dones) * (Q_target_next - self.args.alpha * log_pis_next))
         
@@ -349,7 +343,7 @@ class Agent:
         
         # Train alpha
         if self.args.alpha == None:
-            _, log_pis, _ = self.actor(rgbd[:,:-1], spe[:,:-1], detach_list(h_list))
+            _, log_pis, _ = self.actor(detach_list(h_list))
             alpha_loss = -(self.log_alpha * (log_pis + self.target_entropy))*masks
             alpha_loss = alpha_loss.mean() / masks.mean()
             self.alpha_opt.zero_grad()
@@ -397,7 +391,7 @@ class Agent:
         if self.epochs % self.args.d == 0:
             if self.args.alpha == None: alpha = self.alpha 
             else:                       alpha = self.args.alpha
-            new_actions, log_pis, _ = self.actor(rgbd[:,:-1], spe[:,:-1], detach_list(h_list))
+            new_actions, log_pis, _ = self.actor(detach_list(h_list))
 
             if self.args.action_prior == "normal":
                 loc = torch.zeros(action_size, dtype=torch.float64)

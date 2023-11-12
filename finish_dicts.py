@@ -41,10 +41,8 @@ for folder in folders:
         if(not key in ["args", "arg_title", "arg_name", "pred_lists", "pos_lists", "agent_lists", "spot_names", "steps"]):
             if(key == "free"):
                 min_maxes = []
-                print(min_max_dict[key])
                 for layer in min_max_dict[key]:
                     minimum = None ; maximum = None
-                    print(layer)
                     for min_max in layer:
                         if(  minimum == None):      minimum = min_max[0]
                         elif(minimum > min_max[0]): minimum = min_max[0]

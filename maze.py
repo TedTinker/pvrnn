@@ -53,10 +53,6 @@ class Hard_Maze:
         rgbd = torch.from_numpy(rgbd).float().unsqueeze(0)
         spe = torch.tensor(self.agent_spe).unsqueeze(0).unsqueeze(0)
         
-        #if(self.maze.in_random()):
-        #    rgbd = torch.randint(2, size = rgbd.size(), dtype = rgbd.dtype)
-        #    spe = torch.randint(2, size = spe.size(), dtype = spe.dtype)
-        #    spe[spe == 0] = 0 ; spe[spe == 1] = self.args.max_speed
         return(rgbd, spe)
     
     def change_velocity(self, yaw_change, speed, verbose = False):

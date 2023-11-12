@@ -41,11 +41,11 @@ def hard_plotting_pred(complete_order, plot_dicts):
                     for episode in range(episodes):
                         print("Episode", episode)
                         pred_list = pred_lists[episode]
-                        rows = len(pred_list) ; columns = 2
+                        rows = len(pred_list) ; columns = 3
                         fig, axs = plt.subplots(rows, columns, figsize = (columns * 2, rows * 2.5))
                         title = "Agent {}: Epoch {} (Maze {}), Episode {}".format( agent, epoch, maze_name, episode)
                         fig.suptitle(plot_dict["arg_title"] + "\n" + title, y = 1.1)
-                        for row, (action_name, (rgbd, spe), (pred_rgbd_p, pred_spe_p)) in enumerate(pred_list):
+                        for row, (action_name, (rgbd, spe), (pred_rgbd_p, pred_spe_p), (pred_rgbd_q, pred_spe_q)) in enumerate(pred_list):
                             print(row)
                             for column in range(columns):
                                 ax = axs[row, column] ; ax.axis("off")
@@ -61,7 +61,12 @@ def hard_plotting_pred(complete_order, plot_dicts):
                                     elif(column == 1): 
                                         pred_rgbd_p = fix_image_size(pred_rgbd_p)
                                         ax.imshow(torch.sigmoid(pred_rgbd_p)) 
-                                        ax.set_title("Prediction\nSpeed {}".format(steps_per_step*round(pred_spe_p.item())), fontsize = 12)
+                                        ax.set_title("Prior\nSpeed {}".format(steps_per_step*round(pred_spe_p.item())), fontsize = 12)
+                                    # ZQ Sample
+                                    elif(column == 2): 
+                                        pred_rgbd_q = fix_image_size(pred_rgbd_q)
+                                        ax.imshow(torch.sigmoid(pred_rgbd_q)) 
+                                        ax.set_title("Posterior\nSpeed {}".format(steps_per_step*round(pred_spe_q.item())), fontsize = 12)
                         print("Saving!")
                         plt.savefig("{}/{}.png".format(arg_name, title), format = "png", bbox_inches = "tight", dpi=300)
                         plt.close()

@@ -70,7 +70,7 @@ def add_this(name, args):
 
 
 
-"""add_this("hard",   {
+"""add_this("hard",   {   # This works well.
     "hard_maze" :           True, 
     "maze_list" :           "\"['t']\"",   
     "epochs" :              "\"[500]\"",     
@@ -83,17 +83,17 @@ def add_this(name, args):
     "better_reward" :       "\"[(1,0),(1,10)]\"",
     "step_lim_punishment" : -2,
     "step_cost" :           .99, 
-    "naive_eta" :           1,  
-    "free_eta" :            "\"[1]\"", 
-    "beta" :                "\"[.001]\"", 
-    "target_entropy" :      -2,
+    "naive_eta" :           .5,  
+    "free_eta" :            "\"[.5]\"", 
+    "beta" :                [[{"curiosity" : "free"}, "\"[.01]\""]], 
+    "target_entropy" :      [[{"curiosity" : "none"}, -2.5]],
     "agents_per_pos_list" : 36}) """
-
-add_this("hard",   {
+    
+add_this("hard",   {    # None of this works well at all.
     "hard_maze" :           True, 
     "maze_list" :           "\"['t']\"",   
     "epochs" :              "\"[500]\"",     
-    "time_scales" :         "\"[1, .75]\"",
+    "time_scales" :         ["\"[1,1]\"", "\"[1,.9]\"", "\"[1,.75]\""],
     "image_size" :          8,
     "boxes_high" :          1,
     "max_steps" :           30, 
@@ -102,13 +102,13 @@ add_this("hard",   {
     "better_reward" :       "\"[(1,0),(1,10)]\"",
     "step_lim_punishment" : -2,
     "step_cost" :           .99, 
-    "naive_eta" :           1,  
-    "free_eta" :            "\"[1, 1]\"", 
-    "beta" :                "\"[.001, 1]\"", 
-    "target_entropy" :      -2,
-    "agents_per_pos_list" : 36})
+    "naive_eta" :           .5,  
+    "free_eta" :            [[{"curiosity" : "free"}, ["\"[.5, .5]\"", "\"[.5, 0]\""]]], 
+    "beta" :                [[{"curiosity" : "free"}, ["\"[.01, .01]\"", "\"[.01, 0]\""]]], 
+    "target_entropy" :      [[{"curiosity" : "none"}, -2.5]],
+    "agents_per_pos_list" : 36}) 
     
-add_this("many",   {
+add_this("many",   {    # Haven't tried this yet.
     "hard_maze" :           True, 
     "maze_list" :           "\"['1', '2', '3']\"", 
     "time_scales" :         "\"[1]\"",
@@ -158,7 +158,7 @@ def all_like_this(this):
         
 if(__name__ == "__main__" and args.arg_list == []):
     #for key, value in slurm_dict.items(): print(key, ":", value,"\n")
-    interesting = ["en_hard_{}".format(i) for i in [1,2,3,4,5,6,7,8,9,10,11,12]]
+    interesting = ["ef_hard_{}".format(i) for i in [5,11,12]]
     for this in interesting:
         print("{} : {}".format(this,slurm_dict[this]))
 
