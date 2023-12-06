@@ -141,14 +141,12 @@ def plots(plot_dicts, min_max_dict):
         spot_names = np.array([spot_names for spot_names in plot_dict["spot_names"]])
         agents = spot_names.shape[0]
         xs = [x for x in range(spot_names.shape[1])]
-        if(plot_dict["args"].hard_maze): 
-            kinds = ["NONE"]
-            if("t" in plot_dict["args"].maze_list): kinds += ["LEFT", "RIGHT"]
-            if("alt" in plot_dict["args"].maze_list): kinds += ["RIGHT"]
-            if("1" in plot_dict["args"].maze_list): kinds += ["LEFT", "RIGHT"]
-            if("2" in plot_dict["args"].maze_list): kinds += ["LEFT\nLEFT", "LEFT\nRIGHT", "RIGHT\nLEFT", "RIGHT\nRIGHT"]
-            if("3" in plot_dict["args"].maze_list): kinds += ["LEFT\nLEFT\nLEFT", "LEFT\nLEFT\nRIGHT", "LEFT\nRIGHT\nLEFT", "LEFT\nRIGHT\nRIGHT", "RIGHT\nLEFT\nLEFT", "RIGHT\nLEFT\nRIGHT", "RIGHT\nRIGHT\nLEFT", "RIGHT\nRIGHT\nRIGHT"]
-        else: kinds = ["NONE", "BAD", "GOOD"]
+        kinds = ["NONE"]
+        if("t" in plot_dict["args"].maze_list): kinds += ["LEFT", "RIGHT"]
+        if("alt" in plot_dict["args"].maze_list): kinds += ["RIGHT"]
+        if("1" in plot_dict["args"].maze_list): kinds += ["LEFT", "RIGHT"]
+        if("2" in plot_dict["args"].maze_list): kinds += ["LEFT\nLEFT", "LEFT\nRIGHT", "RIGHT\nLEFT", "RIGHT\nRIGHT"]
+        if("3" in plot_dict["args"].maze_list): kinds += ["LEFT\nLEFT\nLEFT", "LEFT\nLEFT\nRIGHT", "LEFT\nRIGHT\nLEFT", "LEFT\nRIGHT\nRIGHT", "RIGHT\nLEFT\nLEFT", "RIGHT\nLEFT\nRIGHT", "RIGHT\nRIGHT\nLEFT", "RIGHT\nRIGHT\nRIGHT"]
         
         def plot_exits(here):
             so_far = 0
@@ -371,57 +369,57 @@ def plots(plot_dicts, min_max_dict):
             
             
             # Curiosities
-            naive_dict = get_quantiles(plot_dict, "naive")
-            free_dicts = get_list_quantiles(plot_dict["free"], plot_dict)
-            min_max = many_min_max([min_max_dict["naive"]] + [free_min_max for free_min_max in min_max_dict["free"]])
+            prediction_error_dict = get_quantiles(plot_dict, "prediction_error")
+            hidden_state_dicts = get_list_quantiles(plot_dict["hidden_state"], plot_dict)
+            min_max = many_min_max([min_max_dict["prediction_error"]] + [hidden_state_min_max for hidden_state_min_max in min_max_dict["hidden_state"]])
             
             ax = axs[row_num,i] if len(plot_dicts) > 1 else axs[row_num] ; row_num += 1
-            awesome_plot(ax, naive_dict, "green", "Naive")
-            for layer, free_dict in enumerate(free_dicts):
-                awesome_plot(ax, free_dict, (1, layer/len(free_dicts), 0), "Free {}".format(layer+1))
+            awesome_plot(ax, prediction_error_dict, "green", "prediction_error")
+            for layer, hidden_state_dict in enumerate(hidden_state_dicts):
+                awesome_plot(ax, hidden_state_dict, (1, layer/len(hidden_state_dicts), 0), "hidden_state {}".format(layer+1))
             ax.set_ylabel("Curiosity")
             ax.set_xlabel("Epochs")
             ax.legend()
             ax.set_title(plot_dict["arg_title"] + "\nPossible Curiosities")
-            divide_arenas(naive_dict, ax)
+            divide_arenas(prediction_error_dict, ax)
             
             ax = axs[row_num,i] if len(plot_dicts) > 1 else axs[row_num] ; row_num += 1
-            awesome_plot(ax, naive_dict, "green", "Naive", min_max)
-            for layer, free_dict in enumerate(free_dicts):
-                awesome_plot(ax, free_dict, (1, layer/len(free_dicts), 0), "Free {}".format(layer+1), min_max)
+            awesome_plot(ax, prediction_error_dict, "green", "prediction_error", min_max)
+            for layer, hidden_state_dict in enumerate(hidden_state_dicts):
+                awesome_plot(ax, hidden_state_dict, (1, layer/len(hidden_state_dicts), 0), "hidden_state {}".format(layer+1), min_max)
             ax.set_ylabel("Curiosity")
             ax.set_xlabel("Epochs")
             ax.legend()
             ax.set_title(plot_dict["arg_title"] + "\nPossible Curiosities, shared min/max")
-            divide_arenas(naive_dict, ax)
+            divide_arenas(prediction_error_dict, ax)
             
             
             
             # Log Curiosities
-            log_naive_dict = get_logs(naive_dict)
-            log_free_dicts = [get_logs(free_dict) for free_dict in free_dicts]
+            log_prediction_error_dict = get_logs(prediction_error_dict)
+            log_hidden_state_dicts = [get_logs(hidden_state_dict) for hidden_state_dict in hidden_state_dicts]
             
             ax = axs[row_num,i] if len(plot_dicts) > 1 else axs[row_num] ; row_num += 1
-            awesome_plot(ax, log_naive_dict, "green", "log Naive")
-            for layer, log_free_dict in enumerate(log_free_dicts):
-                awesome_plot(ax, log_free_dict, (1, layer/len(free_dicts), 0), "log Free {}".format(layer+1))
+            awesome_plot(ax, log_prediction_error_dict, "green", "log prediction_error")
+            for layer, log_hidden_state_dict in enumerate(log_hidden_state_dicts):
+                awesome_plot(ax, log_hidden_state_dict, (1, layer/len(hidden_state_dicts), 0), "log hidden_state {}".format(layer+1))
             ax.set_ylabel("log Curiosity")
             ax.set_xlabel("Epochs")
             ax.legend()
             ax.set_title(plot_dict["arg_title"] + "\nlog Possible Curiosities")
-            divide_arenas(naive_dict, ax)
+            divide_arenas(prediction_error_dict, ax)
             
             try:
                 min_max = (log(min_max[0]), log(min_max[1]))
                 ax = axs[row_num,i] if len(plot_dicts) > 1 else axs[row_num] ; row_num += 1
-                awesome_plot(ax, log_naive_dict, "green", "log Naive", min_max)
-                for layer, log_free_dict in enumerate(log_free_dicts):
-                    awesome_plot(ax, log_free_dict, (1, layer/len(free_dicts), 0), "log Free {}".format(layer+1), min_max)
+                awesome_plot(ax, log_prediction_error_dict, "green", "log prediction_error", min_max)
+                for layer, log_hidden_state_dict in enumerate(log_hidden_state_dicts):
+                    awesome_plot(ax, log_hidden_state_dict, (1, layer/len(hidden_state_dicts), 0), "log hidden_state {}".format(layer+1), min_max)
                 ax.set_ylabel("log Curiosity")
                 ax.set_xlabel("Epochs")
                 ax.legend()
                 ax.set_title(plot_dict["arg_title"] + "\nlog Possible Curiosities, shared min/max")
-                divide_arenas(naive_dict, ax)
+                divide_arenas(prediction_error_dict, ax)
             except: pass
         
         

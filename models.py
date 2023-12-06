@@ -299,21 +299,26 @@ class Forward(nn.Module):
         pred_rgbd, pred_speed = self.predict_obs(h_w_action)
         return(pred_rgbd, pred_speed)
     
+    # Uh oh, need to adjust this to use next state.
     def forward(self, prev_action, rgbd, speed):
         episodes, steps = episodes_steps(rgbd)
-        zp_mu_lists = [] ; zp_std_lists = [] ;                                                    hp_lists = []
+        zp_mu_lists = [] ; zp_std_lists = [] ;                                                    
         zq_mu_lists = [] ; zq_std_lists = [] ; zq_rgbd_pred_list = [] ; zq_speed_pred_list = [] ; hq_lists = [[torch.zeros(episodes, 1, self.args.hidden_size)] * self.layers]
-        for step in range(steps):
+        for step in range(steps-1):
             zp_mu_list, zp_std_list, hp_list = self.p(prev_action[:,step],                              hq_lists[-1], episodes = episodes)
             zq_mu_list, zq_std_list, hq_list = self.q(prev_action[:,step], rgbd[:,step], speed[:,step], hq_lists[-1])
             zq_rgbd_pred, zq_speed_pred = self.predict(prev_action[:,step+1], hq_list)
-            zp_mu_lists.append(zp_mu_list) ; zp_std_lists.append(zp_std_list) ; hp_lists.append(hp_list)
+            zp_mu_lists.append(zp_mu_list) ; zp_std_lists.append(zp_std_list) 
             zq_mu_lists.append(zq_mu_list) ; zq_std_lists.append(zq_std_list) ; hq_lists.append(hq_list)
             zq_rgbd_pred_list.append(zq_rgbd_pred) ; zq_speed_pred_list.append(zq_speed_pred)
+        zp_mu_list, zp_std_list, hp_list = self.p(prev_action[:,step+1],                                  hq_lists[-1], episodes = episodes)
+        zq_mu_list, zq_std_list, hq_list = self.q(prev_action[:,step+1], rgbd[:,step+1], speed[:,step+1], hq_lists[-1])
+        zp_mu_lists.append(zp_mu_list) ; zp_std_lists.append(zp_std_list) 
+        zq_mu_lists.append(zq_mu_list) ; zq_std_lists.append(zq_std_list)
         hq_lists.append(hq_lists.pop(0))    
         hq_lists = [torch.cat([hq_list[layer] for hq_list in hq_lists], dim = 1) for layer in range(self.args.layers)]
         return(
-            (zp_mu_lists, zp_std_lists,                                        hp_lists), 
+            (zp_mu_lists, zp_std_lists), 
             (zq_mu_lists, zq_std_lists, zq_rgbd_pred_list, zq_speed_pred_list, hq_lists))
 
 

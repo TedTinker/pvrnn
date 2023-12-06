@@ -46,10 +46,10 @@ def expand_args(name, args):
 slurm_dict = {
     "d"    : {}, 
     "e"    : {"alpha" : "None", "curiosity" : "none"},
-    "n"    : {                  "curiosity" : "naive"},
-    "en"   : {"alpha" : "None", "curiosity" : "naive"},
-    "f"    : {                  "curiosity" : "free",  "beta" : .05},
-    "ef"   : {"alpha" : "None", "curiosity" : "free",  "beta" : .05},
+    "n"    : {                  "curiosity" : "prediction_error"},
+    "en"   : {"alpha" : "None", "curiosity" : "prediction_error"},
+    "f"    : {                  "curiosity" : "hidden_state",  "beta" : .05},
+    "ef"   : {"alpha" : "None", "curiosity" : "hidden_state",  "beta" : .05},
     }
 
 def add_this(name, args):
@@ -70,54 +70,49 @@ def add_this(name, args):
 
 
 
-"""add_this("hard",   {   # This works well.
-    "hard_maze" :           True, 
+add_this("hard",   {   # This works well.
     "maze_list" :           "\"['t']\"",   
     "epochs" :              "\"[500]\"",     
     "time_scales" :         "\"[1]\"",
     "image_size" :          8,
-    "boxes_high" :          1,
     "max_steps" :           30, 
     "min_speed" :           0,
     "max_speed" :           75,
     "better_reward" :       "\"[(1,0),(1,10)]\"",
     "step_lim_punishment" : -2,
     "step_cost" :           .99, 
-    "naive_eta" :           .5,  
-    "free_eta" :            "\"[.5]\"", 
-    "beta" :                [[{"curiosity" : "free"}, "\"[.01]\""]], 
+    "prediction_error_eta" :           .5,  
+    "hidden_state_eta" :            "\"[.5]\"", 
+    "beta" :                [[{"curiosity" : "hidden_state"}, "\"[.01]\""]], 
     "target_entropy" :      [[{"curiosity" : "none"}, -2.5]],
-    "agents_per_pos_list" : 36}) """
+    "agents_per_pos_list" : 36})
     
-add_this("hard",   {    # None of this works well at all.
-    "hard_maze" :           True, 
+"""add_this("hard",   {    # None of this works well at all.
     "maze_list" :           "\"['t']\"",   
     "epochs" :              "\"[500]\"",     
     "time_scales" :         ["\"[1,1]\"", "\"[1,.9]\"", "\"[1,.75]\""],
     "image_size" :          8,
-    "boxes_high" :          1,
     "max_steps" :           30, 
     "min_speed" :           0,
     "max_speed" :           75,
     "better_reward" :       "\"[(1,0),(1,10)]\"",
     "step_lim_punishment" : -2,
     "step_cost" :           .99, 
-    "naive_eta" :           .5,  
-    "free_eta" :            [[{"curiosity" : "free"}, ["\"[.5, .5]\"", "\"[.5, 0]\""]]], 
-    "beta" :                [[{"curiosity" : "free"}, ["\"[.01, .01]\"", "\"[.01, 0]\""]]], 
+    "prediction_error_eta" :           .5,  
+    "hidden_state_eta" :            [[{"curiosity" : "hidden_state"}, ["\"[.5, .5]\"", "\"[.5, 0]\""]]], 
+    "beta" :                [[{"curiosity" : "hidden_state"}, ["\"[.01, .01]\"", "\"[.01, 0]\""]]], 
     "target_entropy" :      [[{"curiosity" : "none"}, -2.5]],
-    "agents_per_pos_list" : 36}) 
+    "agents_per_pos_list" : 36}) """
     
 add_this("many",   {    # Haven't tried this yet.
-    "hard_maze" :           True, 
     "maze_list" :           "\"['1', '2', '3']\"", 
     "time_scales" :         "\"[1]\"",
     "image_size" :          8,
     "max_steps" :           30, 
     "min_speed" :           0,
     "max_speed" :           200,
-    "naive_eta" :           2, 
-    "free_eta" :            "\"[2]\"", 
+    "prediction_error_eta" :           2, 
+    "hidden_state_eta" :            "\"[2]\"", 
     "beta" :                "\"[.01]\"", 
     "agents_per_pos_list" : 36, 
     "epochs" :              "\"[500, 2000, 4000]\"", 

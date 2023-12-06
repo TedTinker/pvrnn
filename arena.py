@@ -120,14 +120,9 @@ class Arena():
                 ors = p.getQuaternionFromEuler([0, 0, 0])
                 color = arena_map[loc][::-1] / 255
                 color = np.append(color, 1)
-                for i in range(args.boxes_high):
-                    cube = p.loadURDF("cube.urdf", (pos[0], pos[1], pos[2] + i), ors, 
-                                      useFixedBase=True, physicsClientId=self.physicsClient)
-                    self.colors[cube] = color
-                for i in range(args.boxes_high - 1):
-                    cube = p.loadURDF("cube.urdf", (pos[0], pos[1], pos[2] - i - 1), ors, 
-                                      useFixedBase=True, physicsClientId=self.physicsClient)
-                    self.colors[cube] = color
+                cube = p.loadURDF("cube.urdf", (pos[0], pos[1], pos[2]), ors, 
+                                    useFixedBase=True, physicsClientId=self.physicsClient)
+                self.colors[cube] = color
                 self.cube_locs.append(loc)
         
             
