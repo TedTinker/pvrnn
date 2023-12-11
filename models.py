@@ -8,10 +8,16 @@ from torch.distributions import Normal
 from torchinfo import summary as torch_summary
 from torchgan.layers import SelfAttention2d
 
-from utils import default_args, init_weights, ConstrainedConv2d, ConstrainedConvTranspose2d, Ted_Conv2d, print
+from utils import default_args, ConstrainedConv2d, print
 spe_size = 1 ; action_size = 2
 
 
+
+def init_weights(m):
+    try:
+        torch.nn.init.xavier_normal_(m.weight)
+        m.bias.data.fill_(0.01)
+    except: pass
 
 def episodes_steps(this):
     return(this.shape[0], this.shape[1])
@@ -84,6 +90,8 @@ class Obs_IN(nn.Module):
             nn.Linear(1, args.hidden_size),
             nn.PReLU())
         
+        self.apply(init_weights)
+        
     def forward(self, rgbd, speed):
         if(len(rgbd.shape) == 4):   rgbd  = rgbd.unsqueeze(1)
         if(len(speed.shape) == 2):  speed = speed.unsqueeze(1)
@@ -133,6 +141,8 @@ class Obs_OUT(nn.Module):
             nn.Linear(args.hidden_size, args.hidden_size), 
             nn.PReLU(),
             nn.Linear(args.hidden_size, spe_size))
+        
+        self.apply(init_weights)
                 
     def forward(self, h_w_action):
         episodes, steps = episodes_steps(h_w_action)
@@ -152,6 +162,8 @@ class Action_IN(nn.Module):
             nn.Linear(action_size, args.hidden_size),
             nn.PReLU())
         
+        self.apply(init_weights)
+        
     def forward(self, action):
         if(len(action.shape) == 2):   action = action.unsqueeze(1)
         action = self.action_in(action)
@@ -168,22 +180,27 @@ class MTRNNCell(nn.Module):
         self.new = 1 / time_constant
         self.old = 1 - self.new
 
-        self.weight_ir = nn.Parameter(torch.Tensor(hidden_size, input_size))
-        self.weight_hr = nn.Parameter(torch.Tensor(hidden_size, hidden_size))
-        self.bias_r = nn.Parameter(torch.Tensor(hidden_size))
+        self.r_x = nn.Sequential(
+            nn.Linear(input_size, hidden_size))
+        self.r_h = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size))
         
-        self.weight_iz = nn.Parameter(torch.Tensor(hidden_size, input_size))
-        self.weight_hz = nn.Parameter(torch.Tensor(hidden_size, hidden_size))
-        self.bias_z = nn.Parameter(torch.Tensor(hidden_size))
+        self.z_x = nn.Sequential(
+            nn.Linear(input_size, hidden_size))
+        self.z_h = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size))
         
-        self.weight_in = nn.Parameter(torch.Tensor(hidden_size, input_size))
-        self.weight_hn = nn.Parameter(torch.Tensor(hidden_size, hidden_size))
-        self.bias_n = nn.Parameter(torch.Tensor(hidden_size))
+        self.n_x = nn.Sequential(
+            nn.Linear(input_size, hidden_size))
+        self.n_h = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size))
+        
+        self.apply(init_weights)
 
     def forward(self, x, h):
-        r     = torch.sigmoid(torch.mm(x, self.weight_ir.t()) +     torch.mm(h, self.weight_hr.t()) + self.bias_r)
-        z     = torch.sigmoid(torch.mm(x, self.weight_iz.t()) +     torch.mm(h, self.weight_hz.t()) + self.bias_z)
-        new_h = torch.tanh(   torch.mm(x, self.weight_in.t()) + r * torch.mm(h, self.weight_hn.t()) + self.bias_n)
+        r = torch.sigmoid(self.r_x(x) + self.r_h(h))
+        z = torch.sigmoid(self.z_x(x) + self.z_h(h))
+        new_h = torch.tanh(self.n_x(x) + r * self.n_h(h))
         new_h = new_h * (1 - z)  + h * z
         new_h = new_h * self.new + h * self.old
         return new_h
@@ -192,12 +209,17 @@ class MTRNN(nn.Module):
     def __init__(self, input_size, hidden_size, time_constant):
         super(MTRNN, self).__init__()
         self.mtrnn_cell = MTRNNCell(input_size, hidden_size, time_constant)
+        self.apply(init_weights)
 
     def forward(self, input, h=None):
         episodes, steps = episodes_steps(input)
         outputs = []
         for step in range(steps):  
+            if torch.isnan(input).any():
+                print("mtrnn1")
             h = self.mtrnn_cell(input[:, step], h[:, step])
+            if torch.isnan(h).any():
+                print("mtrnn2")
             outputs.append(h)
         outputs = torch.stack(outputs, dim = 1)
         return outputs[:, -1].unsqueeze(1), outputs
@@ -280,15 +302,33 @@ class Forward(nn.Module):
         if(len(speed.shape)  == 2):      speed       = speed.unsqueeze(1)
         episodes, steps = episodes_steps(rgbd)
         if(hq_m1_list == None):     hq_m1_list = [torch.zeros(episodes, steps, self.args.hidden_size)] * self.layers
+        if torch.isnan(rgbd).any():
+            print("f1")
+        if torch.isnan(speed).any():
+            print("f2")
         obs = self.obs_in(rgbd, speed)
+        if torch.isnan(obs).any():
+            print("f3")
         prev_action = self.action_in(prev_action)
+        if torch.isnan(prev_action).any():
+            print("f4")
         zq_mu_list = [] ; zq_std_list = [] ; zq_list = [] ; hq_list = []
         for layer in range(self.layers):
+            if torch.isnan(hq_m1_list[layer]).any():
+                print("f5")
             z_input = torch.cat((hq_m1_list[layer], obs, prev_action), dim=-1) if layer == 0 else torch.cat((hq_m1_list[layer], hq_list[layer-1]), dim=-1)
             zq_mu, zq_std = var(z_input, self.zq_mu_layers[layer], self.zq_std_layers[layer], self.args)        
+            if torch.isnan(zq_mu).any():
+                print("f6")
+            if torch.isnan(zq_std).any():
+                print("f7")
             zq_mu_list.append(zq_mu) ; zq_std_list.append(zq_std) ; zq_list.append(sample(zq_mu, zq_std))
+            if torch.isnan(zq_list[-1]).any():
+                print("f8")
             h_input = zq_list[layer] if layer+1 == self.layers else torch.cat([zq_list[layer], hq_m1_list[layer+1]], dim = -1)
             hq, _ = self.mtrnn_layers[layer](h_input, hq_m1_list[layer])
+            if torch.isnan(hq).any():
+                print("f9")
             hq_list.append(hq)
         return(zq_mu_list, zq_std_list, hq_list)
         
@@ -299,7 +339,6 @@ class Forward(nn.Module):
         pred_rgbd, pred_speed = self.predict_obs(h_w_action)
         return(pred_rgbd, pred_speed)
     
-    # Uh oh, need to adjust this to use next state.
     def forward(self, prev_action, rgbd, speed):
         episodes, steps = episodes_steps(rgbd)
         zp_mu_lists = [] ; zp_std_lists = [] ;                                                    
@@ -353,10 +392,18 @@ class Actor(nn.Module):
     def forward(self, h = None):
         if(h == None): h = torch.zeros(1, 1, self.args.hidden_size)
         else: h = h[0]
+        if torch.isnan(h).any():
+            print("a1")
         x = self.lin(h)
+        if torch.isnan(x).any():
+            print("a2")
         mu, std = var(x, self.mu, self.std, self.args)
         x = sample(mu, std)
+        if torch.isnan(x).any():
+            print("a3")
         action = torch.tanh(x)
+        if torch.isnan(action).any():
+            print("a4")
         log_prob = Normal(mu, std).log_prob(x) - torch.log(1 - action.pow(2) + 1e-6)
         log_prob = torch.mean(log_prob, -1).unsqueeze(-1)
         return(action, log_prob, None)

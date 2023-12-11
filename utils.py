@@ -11,6 +11,8 @@ import torch
 from torch import nn 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("DEVICE:", device)
+device = "cpu"
 
 if(os.getcwd().split("/")[-1] != "pvrnn"): os.chdir("pvrnn")
 
@@ -271,12 +273,6 @@ else:
         else: print("{}:\n\tDefault:\t{}\n\tThis time:\t{}".format(arg, default, this_time))
 
 
-
-def init_weights(m):
-    try:
-        torch.nn.init.xavier_normal_(m.weight)
-        m.bias.data.fill_(0.01)
-    except: pass
     
 class ConstrainedConv2d(nn.Conv2d):
     def forward(self, input):
