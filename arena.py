@@ -34,32 +34,32 @@ arena_dict = {
     
     "1.png" : Arena_Description(
         (2,2), 
-        [Exit(  "LEFT",    (1,0), "default"),
-        Exit(   "RIGHT",    (1,4), "better")],
+        [Exit(  "L",    (1,0), "default"),
+        Exit(   "R",    (1,4), "better")],
         [(0, 0), (0, 1), 
          (2, 0), (2, 1)] # Left side
         ),
     
     "2.png" : Arena_Description(
         (3,3), 
-        [Exit(  "LEFT\nLEFT",   (4,1), "default"),
-        Exit(   "LEFT\nRIGHT",  (0,1), "better"),
-        Exit(   "RIGHT\nLEFT",  (0,5), "default"),
-        Exit(   "RIGHT\nRIGHT", (4,5), "default")],
+        [Exit(  "LL",   (4,1), "default"),
+        Exit(   "LR",  (0,1), "better"),
+        Exit(   "RL",  (0,5), "default"),
+        Exit(   "RR", (4,5), "default")],
         [(3, 0), (3, 2), 
          (4, 0), (4, 2)] # Left Left. This one works, it's in the paper.
         #[(3, 4), (3, 6), (4, 4), (4, 6)] # Right Right. This one would be easier to explain.
         ),
     "3.png" : Arena_Description(
         (4,4), 
-        [Exit(  "LEFT\nLEFT\nLEFT",    (6,3), "default"),
-        Exit(   "LEFT\nLEFT\nRIGHT",   (6,1), "default"),
-        Exit(   "LEFt\nRIGHT\nLEFT",   (0,1), "default"),
-        Exit(   "LEFT\nRIGHT\nRIGHT",  (0,3), "default"),
-        Exit(   "RIGHT\nLEFT\nLEFT",   (0,5), "better"),
-        Exit(   "RIGHT\nLEFT\nRIGHT",  (0,7), "default"),
-        Exit(   "RIGHT\nRIGHT\nLEFT",  (6,7), "default"),
-        Exit(   "RIGHT\nRIGHT\nRIGHT", (6,5), "default")],
+        [Exit(  "LLL",    (6,3), "default"),
+        Exit(   "LLR",   (6,1), "default"),
+        Exit(   "LRL",   (0,1), "default"),
+        Exit(   "LRR",  (0,3), "default"),
+        Exit(   "RLL",   (0,5), "better"),
+        Exit(   "RLR",  (0,7), "default"),
+        Exit(   "RRL",  (6,7), "default"),
+        Exit(   "RRR", (6,5), "default")],
         [(4, 1), (4, 3), 
          (5, 0), 
          (6, 0), (6, 2)] # Left, Left, Right

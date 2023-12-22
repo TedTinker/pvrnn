@@ -194,9 +194,12 @@ def hard_plotting_pos(complete_order, plot_dicts):
                     fig2, ax2 = plt.subplots(figsize = (3, 3) if too_many_plot_dicts else (10, 10))  
                     plot_pos(ax2, False)  
                     title = real_names[arg_name] if arg_name in real_names else "with Curiosity Traps"
+                    print("\n\n")
+                    print("TITLE:", title)
                     if(maze_name in ["1", "t"]): title = title
                     else:                        title = ""   
-                    if(arg_name.split("_")[0] == "hard"):                   
+                    print("TITLE:", title)
+                    if(arg_name.split("_")[1] == "hard"):                   
                         ax2.set_title(title)
                     fig2.savefig("saved/thesis_pics/paths_{}_{}.png".format(plot_dict["arg_name"], saved_paths), bbox_inches = "tight", dpi=300) 
                     plt.close(fig2)            

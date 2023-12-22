@@ -143,18 +143,17 @@ def plots(plot_dicts, min_max_dict):
         xs = [x for x in range(spot_names.shape[1])]
         kinds = ["NONE"]
         if("t" in plot_dict["args"].maze_list): kinds += ["LEFT", "RIGHT"]
-        if("alt" in plot_dict["args"].maze_list): kinds += ["RIGHT"]
-        if("1" in plot_dict["args"].maze_list): kinds += ["LEFT", "RIGHT"]
-        if("2" in plot_dict["args"].maze_list): kinds += ["LEFT\nLEFT", "LEFT\nRIGHT", "RIGHT\nLEFT", "RIGHT\nRIGHT"]
-        if("3" in plot_dict["args"].maze_list): kinds += ["LEFT\nLEFT\nLEFT", "LEFT\nLEFT\nRIGHT", "LEFT\nRIGHT\nLEFT", "LEFT\nRIGHT\nRIGHT", "RIGHT\nLEFT\nLEFT", "RIGHT\nLEFT\nRIGHT", "RIGHT\nRIGHT\nLEFT", "RIGHT\nRIGHT\nRIGHT"]
+        if("1" in plot_dict["args"].maze_list): kinds += ["L", "R"]
+        if("2" in plot_dict["args"].maze_list): kinds += ["LL", "LR", "RL", "RR"]
+        if("3" in plot_dict["args"].maze_list): kinds += ["LLL", "LLR", "LRL", "LRR", "RLL", "RLR", "RRL", "RRR"]
         
         def plot_exits(here):
             so_far = 0
             for maze, epochs in zip(plot_dict["args"].maze_list, plot_dict["args"].epochs):
                 for j, kind in enumerate(kinds):
-                    if((maze, kind) in [("t", "RIGHT"), ("1", "RIGHT"), ("2", "LEFT\nRIGHT"), ("3", "RIGHT\nLEFT\nLEFT")]):
+                    if((maze, kind) in [("t", "RIGHT"), ("1", "R"), ("2", "LR"), ("3", "RLL")]):
                         these_xs = [x for x in xs if x >= so_far and x <= so_far + epochs]
-                        here.fill_between(these_xs, [j*agents*1.1 for _ in these_xs], [j*agents*1.1 + agents for _ in these_xs], color = (.9, .9, .9, 1), linewidth = 0)
+                        here.fill_between(these_xs, [j*agents*1.1 for _ in these_xs], [j*agents*1.1 + agents for _ in these_xs], color = (.8, .8, .8, 1), linewidth = 0)
                         so_far += epochs
             for j, kind in enumerate(kinds):
                 counts = np.count_nonzero(spot_names == kind, 0)

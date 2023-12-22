@@ -69,7 +69,7 @@ def hard_p_values(complete_order, plot_dicts):
                     all_agent_spots = [] 
                     for spot_names in plot_dict["spot_names"]:
                         final_spots = spot_names[epochs + total_epochs - prev_episodes - 1 : epochs + total_epochs - 1]
-                        final_spots = [1 if spot in ["RIGHT", "LEFT\nRIGHT", "RIGHT\nLEFT\nLEFT"] else 0 for spot in final_spots]
+                        final_spots = [1 if spot in ["RIGHT", "R", "LR", "RLL"] else 0 for spot in final_spots]
                         final_spots = sum(final_spots)/prev_episodes
                         all_agent_spots.append(final_spots)
 
@@ -119,10 +119,11 @@ def hard_p_values(complete_order, plot_dicts):
             ax.plot([bar_center - 0.02, bar_center + 0.02], [all_conf[i][1], all_conf[i][1]], color="black")
             if i in [0, 3]:
                 ax.axvline(x = x + bar_width + (spacing - bar_width)/2, color='black', linestyle='dotted')
+                # Can we also have a light-gray dotted line to show which bar in each area is bigger?
             x += spacing  
 
         ax.set_xlim(0, x)
-        ax.set_ylim(0, 1.1)  # Adding 1 for a bit of padding at the top
+        ax.set_ylim(0, 1.1)  
         ax.set_ylabel('Proportion of Correct Exits')
         plt.title("Agent Performance\n(Epoch {}, {})".format(epochs + total_epochs, maze_real_names[maze_name])) 
         ax.axes.get_xaxis().set_visible(False)  # Hide the x-axis

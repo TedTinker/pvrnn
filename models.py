@@ -6,9 +6,8 @@ from torch import nn
 import torch.nn.functional as F
 from torch.distributions import Normal
 from torchinfo import summary as torch_summary
-from torchgan.layers import SelfAttention2d
 
-from utils import default_args, ConstrainedConv2d, print
+from utils import default_args, detach_list, attach_list, ConstrainedConv2d, print
 spe_size = 1 ; action_size = 2
 
 
@@ -27,8 +26,8 @@ def var(x, mu_func, std_func, args):
     std = torch.clamp(std_func(x), min = args.std_min, max = args.std_max)
     return(mu, std)
 
-def sample(mu, std):
-    e = Normal(0, 1).sample(std.shape).to("cuda" if std.is_cuda else "cpu")
+def sample(mu, std, device):
+    e = Normal(0, 1).sample(std.shape).to(device)
     return(mu + e * std)
 
 def rnn_cnn(do_this, to_this):
@@ -91,8 +90,10 @@ class Obs_IN(nn.Module):
             nn.PReLU())
         
         self.apply(init_weights)
+        self.to(args.device)
         
     def forward(self, rgbd, speed):
+        [rgbd, speed] = attach_list([rgbd, speed], self.args.device)
         if(len(rgbd.shape) == 4):   rgbd  = rgbd.unsqueeze(1)
         if(len(speed.shape) == 2):  speed = speed.unsqueeze(1)
         rgbd = (rgbd.permute(0, 1, 4, 2, 3) * 2) - 1
@@ -109,6 +110,7 @@ class Obs_OUT(nn.Module):
     def __init__(self, args = default_args):
         super(Obs_OUT, self).__init__()  
                 
+        self.args = args
         self.gen_shape = (4, 2, 2) 
         self.rgbd_out_lin = nn.Sequential(
             nn.Linear(2 * args.hidden_size, self.gen_shape[0] * self.gen_shape[1] * self.gen_shape[2]),
@@ -143,8 +145,10 @@ class Obs_OUT(nn.Module):
             nn.Linear(args.hidden_size, spe_size))
         
         self.apply(init_weights)
+        self.to(args.device)
                 
     def forward(self, h_w_action):
+        [h_w_action] = attach_list([h_w_action], self.args.device)
         episodes, steps = episodes_steps(h_w_action)
         rgbd = self.rgbd_out_lin(h_w_action).view((episodes, steps, self.gen_shape[0], self.gen_shape[1], self.gen_shape[2]))
         rgbd_pred = rnn_cnn(self.rgbd_out, rgbd).permute(0, 1, 3, 4, 2)
@@ -158,13 +162,17 @@ class Action_IN(nn.Module):
     def __init__(self, args = default_args):
         super(Action_IN, self).__init__()
         
+        self.args = args 
+        
         self.action_in = nn.Sequential(
             nn.Linear(action_size, args.hidden_size),
             nn.PReLU())
         
         self.apply(init_weights)
+        self.to(args.device)
         
     def forward(self, action):
+        [action] = attach_list([action], self.args.device)
         if(len(action.shape) == 2):   action = action.unsqueeze(1)
         action = self.action_in(action)
         return(action)
@@ -172,8 +180,9 @@ class Action_IN(nn.Module):
         
 
 class MTRNNCell(nn.Module):
-    def __init__(self, input_size, hidden_size, time_constant):
+    def __init__(self, input_size, hidden_size, time_constant, args):
         super(MTRNNCell, self).__init__()
+        self.args = args
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.time_constant = time_constant
@@ -196,30 +205,31 @@ class MTRNNCell(nn.Module):
             nn.Linear(hidden_size, hidden_size))
         
         self.apply(init_weights)
+        self.to(args.device)
 
     def forward(self, x, h):
+        attach_list([x, h], self.args.device)
         r = torch.sigmoid(self.r_x(x) + self.r_h(h))
         z = torch.sigmoid(self.z_x(x) + self.z_h(h))
         new_h = torch.tanh(self.n_x(x) + r * self.n_h(h))
         new_h = new_h * (1 - z)  + h * z
         new_h = new_h * self.new + h * self.old
+        detach_list([r, z])
         return new_h
 
 class MTRNN(nn.Module):
-    def __init__(self, input_size, hidden_size, time_constant):
+    def __init__(self, input_size, hidden_size, time_constant, args):
         super(MTRNN, self).__init__()
-        self.mtrnn_cell = MTRNNCell(input_size, hidden_size, time_constant)
+        self.args = args
+        self.mtrnn_cell = MTRNNCell(input_size, hidden_size, time_constant, args)
         self.apply(init_weights)
 
-    def forward(self, input, h=None):
+    def forward(self, input, h):
+        [input, h] = attach_list([input, h], self.args.device)
         episodes, steps = episodes_steps(input)
         outputs = []
         for step in range(steps):  
-            if torch.isnan(input).any():
-                print("mtrnn1")
             h = self.mtrnn_cell(input[:, step], h[:, step])
-            if torch.isnan(h).any():
-                print("mtrnn2")
             outputs.append(h)
         outputs = torch.stack(outputs, dim = 1)
         return outputs[:, -1].unsqueeze(1), outputs
@@ -231,7 +241,7 @@ class Forward(nn.Module):
     def __init__(self, args = default_args):
         super(Forward, self).__init__()
         
-        self.args = default_args
+        self.args = args
         self.layers = len(args.time_scales)
                 
         self.obs_in = Obs_IN(args)
@@ -270,7 +280,8 @@ class Forward(nn.Module):
             mtrnn_layers.append(MTRNN(
                 input_size = args.state_size + (args.hidden_size if layer + 1 < self.layers else 0),
                 hidden_size = args.hidden_size, 
-                time_constant = args.time_scales[layer]))
+                time_constant = args.time_scales[layer],
+                args = args))
             
         self.zp_mu_layers  = nn.ModuleList(zp_mu_layers)
         self.zp_std_layers = nn.ModuleList(zp_std_layers)
@@ -281,16 +292,17 @@ class Forward(nn.Module):
         self.predict_obs = Obs_OUT(args)
         
         self.apply(init_weights)
+        self.to(args.device)
         
     def p(self, prev_action, hq_m1_list = None, episodes = 1):
-        if(hq_m1_list == None): 
-            hq_m1_list  = [torch.zeros(episodes, 1, self.args.hidden_size)] * self.layers
+        if(hq_m1_list == None): hq_m1_list  = [torch.zeros(episodes, 1, self.args.hidden_size)] * self.layers
+        [prev_action, hq_m1_list] = attach_list([prev_action, hq_m1_list], self.args.device)
         prev_action = self.action_in(prev_action)
         zp_mu_list = [] ; zp_std_list = [] ; zp_list = [] ; hp_list = []
         for layer in range(self.layers):
             z_input = hq_m1_list[layer] if layer != 0 else torch.cat([hq_m1_list[layer], prev_action], dim = -1) 
             zp_mu, zp_std = var(z_input, self.zp_mu_layers[layer], self.zp_std_layers[layer], self.args)
-            zp_mu_list.append(zp_mu) ; zp_std_list.append(zp_std) ; zp_list.append(sample(zp_mu, zp_std))
+            zp_mu_list.append(zp_mu) ; zp_std_list.append(zp_std) ; zp_list.append(sample(zp_mu, zp_std, self.args.device))
             h_input = zp_list[layer] if layer+1 == self.layers else torch.cat([zp_list[layer], hq_m1_list[layer+1]], dim = -1) 
             hp, _ = self.mtrnn_layers[layer](h_input, hq_m1_list[layer]) 
             hp_list.append(hp)
@@ -302,47 +314,34 @@ class Forward(nn.Module):
         if(len(speed.shape)  == 2):      speed       = speed.unsqueeze(1)
         episodes, steps = episodes_steps(rgbd)
         if(hq_m1_list == None):     hq_m1_list = [torch.zeros(episodes, steps, self.args.hidden_size)] * self.layers
-        if torch.isnan(rgbd).any():
-            print("f1")
-        if torch.isnan(speed).any():
-            print("f2")
+        [prev_action, rgbd, speed, hq_m1_list] = attach_list([prev_action, rgbd, speed, hq_m1_list], self.args.device)
         obs = self.obs_in(rgbd, speed)
-        if torch.isnan(obs).any():
-            print("f3")
         prev_action = self.action_in(prev_action)
-        if torch.isnan(prev_action).any():
-            print("f4")
         zq_mu_list = [] ; zq_std_list = [] ; zq_list = [] ; hq_list = []
         for layer in range(self.layers):
-            if torch.isnan(hq_m1_list[layer]).any():
-                print("f5")
             z_input = torch.cat((hq_m1_list[layer], obs, prev_action), dim=-1) if layer == 0 else torch.cat((hq_m1_list[layer], hq_list[layer-1]), dim=-1)
             zq_mu, zq_std = var(z_input, self.zq_mu_layers[layer], self.zq_std_layers[layer], self.args)        
-            if torch.isnan(zq_mu).any():
-                print("f6")
-            if torch.isnan(zq_std).any():
-                print("f7")
-            zq_mu_list.append(zq_mu) ; zq_std_list.append(zq_std) ; zq_list.append(sample(zq_mu, zq_std))
-            if torch.isnan(zq_list[-1]).any():
-                print("f8")
+            zq_mu_list.append(zq_mu) ; zq_std_list.append(zq_std) ; zq_list.append(sample(zq_mu, zq_std, self.args.device))
             h_input = zq_list[layer] if layer+1 == self.layers else torch.cat([zq_list[layer], hq_m1_list[layer+1]], dim = -1)
             hq, _ = self.mtrnn_layers[layer](h_input, hq_m1_list[layer])
-            if torch.isnan(hq).any():
-                print("f9")
             hq_list.append(hq)
         return(zq_mu_list, zq_std_list, hq_list)
         
     def predict(self, action, h): 
         if(len(action.shape) == 2): action = action.unsqueeze(1)
         if(len(h[0].shape) == 2):   h[0]   = h[0].unsqueeze(1)
+        [action, h] = attach_list([action, h], self.args.device)
         h_w_action = torch.cat([self.action_in(action), h[0]], dim = -1)
         pred_rgbd, pred_speed = self.predict_obs(h_w_action)
+        detach_list([h_w_action])
         return(pred_rgbd, pred_speed)
     
     def forward(self, prev_action, rgbd, speed):
+        [prev_action, rgbd, speed] = attach_list([prev_action, rgbd, speed], self.args.device)
         episodes, steps = episodes_steps(rgbd)
         zp_mu_lists = [] ; zp_std_lists = [] ;                                                    
-        zq_mu_lists = [] ; zq_std_lists = [] ; zq_rgbd_pred_list = [] ; zq_speed_pred_list = [] ; hq_lists = [[torch.zeros(episodes, 1, self.args.hidden_size)] * self.layers]
+        zq_mu_lists = [] ; zq_std_lists = [] ; zq_rgbd_pred_list = [] ; zq_speed_pred_list = [] ; hq_lists = [[torch.zeros(episodes, 1, self.args.hidden_size).to(self.args.device)] * self.layers]
+        step = -1
         for step in range(steps-1):
             zp_mu_list, zp_std_list, hp_list = self.p(prev_action[:,step],                              hq_lists[-1], episodes = episodes)
             zq_mu_list, zq_std_list, hq_list = self.q(prev_action[:,step], rgbd[:,step], speed[:,step], hq_lists[-1])
@@ -392,20 +391,14 @@ class Actor(nn.Module):
     def forward(self, h = None):
         if(h == None): h = torch.zeros(1, 1, self.args.hidden_size)
         else: h = h[0]
-        if torch.isnan(h).any():
-            print("a1")
+        [h] = attach_list([h], self.args.device)
         x = self.lin(h)
-        if torch.isnan(x).any():
-            print("a2")
         mu, std = var(x, self.mu, self.std, self.args)
-        x = sample(mu, std)
-        if torch.isnan(x).any():
-            print("a3")
+        x = sample(mu, std, self.args.device)
         action = torch.tanh(x)
-        if torch.isnan(action).any():
-            print("a4")
         log_prob = Normal(mu, std).log_prob(x) - torch.log(1 - action.pow(2) + 1e-6)
         log_prob = torch.mean(log_prob, -1).unsqueeze(-1)
+        detach_list([x, mu, std])
         return(action, log_prob, None)
     
     
@@ -437,10 +430,12 @@ class Critic(nn.Module):
         self.to(args.device)
 
     def forward(self, rgbd, speed, action, h = None):
+        [rgbd, speed, action] = attach_list([rgbd, speed, action], self.args.device)
         obs = self.obs_in(rgbd, speed)
         action = self.action_in(action)
         h, _ = self.gru(torch.cat((obs, action), dim=-1), h)
         Q = self.lin(self.h_in(h))
+        detach_list([obs, action])
         return(Q, h)
     
 
@@ -448,7 +443,7 @@ class Critic(nn.Module):
 if __name__ == "__main__":
     
     args = default_args
-    e = 3 ; s = 3
+    e = 1 ; s = 1
     
     
     forward = Forward(args)
@@ -456,7 +451,7 @@ if __name__ == "__main__":
     print("\n\n")
     print(forward)
     print()
-    print(torch_summary(forward, ((e, s+1, action_size), (e, s, args.image_size, args.image_size, 4), (e, s, spe_size))))
+    print(torch_summary(forward, ((e, s+1, action_size), (e, s+1, args.image_size, args.image_size, 4), (e, s+1, spe_size))))
     
     
     

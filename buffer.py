@@ -18,7 +18,7 @@ def as_probas(positive_values: np.array) -> np.array:
 
 
 def as_tensor_on_device(np_array: np.array):
-    return torch.tensor(np_array).float().to("cpu")
+    return torch.tensor(np_array).float()
 
 class RecurrentReplayBuffer:
 
@@ -85,9 +85,9 @@ class RecurrentReplayBuffer:
 
         # fill placeholders
 
-        self.o[self.episode_ptr, self.time_ptr] = o
-        self.s[self.episode_ptr, self.time_ptr] = s
-        self.a[self.episode_ptr, self.time_ptr] = a
+        self.o[self.episode_ptr, self.time_ptr] = o.cpu()
+        self.s[self.episode_ptr, self.time_ptr] = s.cpu()
+        self.a[self.episode_ptr, self.time_ptr] = a.cpu()
         self.r[self.episode_ptr, self.time_ptr] = r
         self.d[self.episode_ptr, self.time_ptr] = d
         self.m[self.episode_ptr, self.time_ptr] = 1

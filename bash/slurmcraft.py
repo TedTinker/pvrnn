@@ -70,7 +70,7 @@ def add_this(name, args):
 
 
 
-add_this("hard",   {   # This works well.
+add_this("hard",   {   
     "maze_list" :           "\"['t']\"",   
     "epochs" :              "\"[500]\"",     
     "time_scales" :         "\"[1]\"",
@@ -79,47 +79,25 @@ add_this("hard",   {   # This works well.
     "min_speed" :           0,
     "max_speed" :           75,
     "better_reward" :       "\"[(1,0),(1,10)]\"",
-    "step_lim_punishment" : -2,
-    "step_cost" :           .99, 
     "prediction_error_eta" :.5,  
     "hidden_state_eta" :    "\"[.5]\"", 
-    "beta" :                [[{"curiosity" : "hidden_state"}, "\"[.01]\""]], 
-    "target_entropy" :      [[{"curiosity" : "none"}, -2.5]],
+    "beta" :                "\"[.01]\"", 
     "agents_per_pos_list" : 36})
     
-"""add_this("hard",   {    # None of this works well at all.
-    "maze_list" :           "\"['t']\"",   
-    "epochs" :              "\"[500]\"",     
-    "time_scales" :         ["\"[1,1]\"", "\"[1,.9]\"", "\"[1,.75]\""],
-    "image_size" :          8,
-    "max_steps" :           30, 
-    "min_speed" :           0,
-    "max_speed" :           75,
-    "better_reward" :       "\"[(1,0),(1,10)]\"",
-    "step_lim_punishment" : -2,
-    "step_cost" :           .99, 
-    "prediction_error_eta" :           .5,  
-    "hidden_state_eta" :            [[{"curiosity" : "hidden_state"}, ["\"[.5, .5]\"", "\"[.5, 0]\""]]], 
-    "beta" :                [[{"curiosity" : "hidden_state"}, ["\"[.01, .01]\"", "\"[.01, 0]\""]]], 
-    "target_entropy" :      [[{"curiosity" : "none"}, -2.5]],
-    "agents_per_pos_list" : 36}) """
-    
-add_this("many",   {    # Haven't tried this yet.
+add_this("many",   {    
     "maze_list" :           "\"['1', '2', '3']\"", 
+    "epochs" :              "\"[500, 2000, 4000]\"", 
     "time_scales" :         "\"[1]\"",
     "image_size" :          8,
     "max_steps" :           30, 
     "min_speed" :           0,
     "max_speed" :           200,
-    "prediction_error_eta" :2, 
-    "hidden_state_eta" :    "\"[2]\"", 
-    "beta" :                [[{"curiosity" : "hidden_state"}, "\"[.01]\""]], 
+    "default_reward" :      "\"[(1,-.5)]\"",
+    "better_reward" :       "\"[(1,10)]\"",
+    "prediction_error_eta" :1,
+    "hidden_state_eta" :    "\"[1]\"",
+    "beta" :                "\"[.03]\"",
     "agents_per_pos_list" : 36, 
-    "epochs" :              "\"[500, 2000, 4000]\"", 
-    "default_reward" :      "\"[(1,0)]\"", 
-    "better_reward" :       "\"[(1,30)]\"",
-    "wall_punishment" :     -1,
-    "step_lim_punishment" : 0,
     "target_entropy" :      0
     })
     
@@ -153,7 +131,7 @@ def all_like_this(this):
         
 if(__name__ == "__main__" and args.arg_list == []):
     #for key, value in slurm_dict.items(): print(key, ":", value,"\n")
-    interesting = ["ef_hard_{}".format(i) for i in [5,11,12]]
+    interesting = ["f_many_{}".format(i) for i in [1,4]]
     for this in interesting:
         print("{} : {}".format(this,slurm_dict[this]))
 
@@ -167,11 +145,8 @@ if(__name__ == "__main__" and args.arg_list != []):
 """
 #!/bin/bash -l
 #SBATCH --partition=compute
-#SBATCH --nodes=1
-#SBATCH --cpus-per-task=1
-#SBATCH --time 05:00:00
-#SBATCH --mem=50G
-"""
+#SBATCH --time 2:00:00
+#SBATCH --mem=25G"""
 
     if(args.comp == "saion"):
         nv = "--nv"
@@ -183,9 +158,8 @@ if(__name__ == "__main__" and args.arg_list != []):
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
 #SBATCH --time 48:00:00
-#SBATCH --mem=50G
-#SBATCH --gres=gpu:4
-"""
+#SBATCH --mem=490G
+#SBATCH --gres=gpu:4"""
     for name in args.arg_list:
         if(name in ["break", "empty_space"]): pass 
         else:

@@ -9,6 +9,7 @@ from math import exp, pi
 from time import sleep
 import torch
 from torch import nn 
+import platform
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("DEVICE:", device)
@@ -40,6 +41,23 @@ def estimate_total_duration(proportion_completed, start_time=start_time):
         estimated_total = estimated_total - datetime.timedelta(microseconds=estimated_total.microseconds)
     else: estimated_total = "?:??:??"
     return(estimated_total)
+    
+def attach_list(tensor_list, device):
+    updated_list = []
+    for tensor in tensor_list:
+        if isinstance(tensor, list):
+            updated_sublist = [t.to(device) if t.device != device else t for t in tensor]
+            updated_list.append(updated_sublist)
+        else:
+            updated_tensor = tensor.to(device) if tensor.device != device else tensor
+            updated_list.append(updated_tensor)
+    return updated_list
+
+def detach_list(l): 
+    return([element.detach() for element in l])
+    
+def memory_usage(device):
+    print(device, ":", platform.node(), torch.cuda.memory_allocated(device), "out of", torch.cuda.max_memory_allocated(device))
 
 
 # Arguments to parse. 
@@ -153,7 +171,7 @@ parser.add_argument('--capacity',           type=int,        default = 250,
     # Training
 parser.add_argument('--epochs',             type=literal,    default = [1000],
                     help='List of how many epochs to train in each maze.')
-parser.add_argument('--batch_size',         type=int,        default = 128,
+parser.add_argument('--batch_size',         type=int,        default = 32, #128,
                     help='How many episodes are sampled for each epoch.')
 parser.add_argument('--GAMMA',              type=float,      default = .9,
                     help='How heavily critics consider the future.')
@@ -306,11 +324,6 @@ class Ted_Conv2d(nn.Module):
         y = []
         for Conv2d in self.Conv2ds: y.append(Conv2d(x)) 
         return(torch.cat(y, dim = -3))
-    
-    
-    
-def detach_list(l):
-    return([element.detach() for element in l])
 
 
     

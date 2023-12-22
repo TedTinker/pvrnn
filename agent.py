@@ -10,7 +10,7 @@ from math import log
 from itertools import accumulate
 from copy import deepcopy
 
-from utils import default_args, detach_list, dkl, print
+from utils import default_args, detach_list, attach_list, dkl, print
 from maze import Hard_Maze
 from buffer import RecurrentReplayBuffer
 from models import Forward, Actor, Critic
@@ -29,44 +29,44 @@ class Agent:
         self.args = args
         self.episodes = 0 ; self.epochs = 0 ; self.steps = 0
         self.maze_name = self.args.maze_list[0]
-        self.maze = Hard_Maze(self.maze_name, args = args)
+        self.maze = Hard_Maze(self.maze_name, args = self.args)
         
-        self.target_entropy = args.target_entropy # -dim(A)
+        self.target_entropy = self.args.target_entropy # -dim(A)
         self.alpha = 1
         self.log_alpha = torch.tensor([0.0], requires_grad=True)
-        self.alpha_opt = optim.Adam(params=[self.log_alpha], lr=args.alpha_lr) 
+        self.alpha_opt = optim.Adam(params=[self.log_alpha], lr=self.args.alpha_lr) 
         
         self.prediction_error_eta = 1
         self.log_prediction_error_eta = torch.tensor([0.0], requires_grad=True)
-        self.prediction_error_eta_opt = optim.Adam(params=[self.log_prediction_error_eta], lr=args.alpha_lr) 
+        self.prediction_error_eta_opt = optim.Adam(params=[self.log_prediction_error_eta], lr=self.args.alpha_lr) 
         
-        self.hidden_state_eta = [1] * len(args.time_scales)
-        self.log_hidden_state_eta = [torch.tensor([0.0], requires_grad=True)] * len(args.time_scales)
-        self.hidden_state_eta_opt = [optim.Adam(params=[self.log_hidden_state_eta[layer]], lr=args.alpha_lr) for layer in range(len(args.time_scales))]
+        self.hidden_state_eta = [1] * len(self.args.time_scales)
+        self.log_hidden_state_eta = [torch.tensor([0.0], requires_grad=True)] * len(self.args.time_scales)
+        self.hidden_state_eta_opt = [optim.Adam(params=[self.log_hidden_state_eta[layer]], lr=self.args.alpha_lr) for layer in range(len(self.args.time_scales))]
         
-        self.forward = Forward(args)
-        self.forward_opt = optim.Adam(self.forward.parameters(), lr=args.forward_lr)
+        self.forward = Forward(self.args)
+        self.forward_opt = optim.Adam(self.forward.parameters(), lr=self.args.forward_lr)
                            
-        self.actor = Actor(args)
-        self.actor_opt = optim.Adam(self.actor.parameters(), lr=args.actor_lr) 
+        self.actor = Actor(self.args)
+        self.actor_opt = optim.Adam(self.actor.parameters(), lr=self.args.actor_lr) 
         
-        self.critic1 = Critic(args)
-        self.critic1_opt = optim.Adam(self.critic1.parameters(), lr=args.critic_lr)
-        self.critic1_target = Critic(args)
+        self.critic1 = Critic(self.args)
+        self.critic1_opt = optim.Adam(self.critic1.parameters(), lr=self.args.critic_lr)
+        self.critic1_target = Critic(self.args)
         self.critic1_target.load_state_dict(self.critic1.state_dict())
 
-        self.critic2 = Critic(args)
-        self.critic2_opt = optim.Adam(self.critic2.parameters(), lr=args.critic_lr)
-        self.critic2_target = Critic(args)
+        self.critic2 = Critic(self.args)
+        self.critic2_opt = optim.Adam(self.critic2.parameters(), lr=self.args.critic_lr)
+        self.critic2_target = Critic(self.args)
         self.critic2_target.load_state_dict(self.critic2.state_dict())
         
         self.train()
         
-        self.memory = RecurrentReplayBuffer(args)
+        self.memory = RecurrentReplayBuffer(self.args)
         self.plot_dict = {
-            "args" : args,
-            "arg_title" : args.arg_title,
-            "arg_name" : args.arg_name,
+            "args" : self.args,
+            "arg_title" : self.args.arg_title,
+            "arg_name" : self.args.arg_name,
             "pred_lists" : {}, "pos_lists" : {}, 
             "agent_lists" : {"forward" : Forward, "actor" : Actor, "critic" : Critic},
             "rewards" : [], "spot_names" : [], "steps" : [],
@@ -75,12 +75,11 @@ class Agent:
             "critic_1" : [], "critic_2" : [], 
             "extrinsic" : [], "intrinsic_curiosity" : [], 
             "intrinsic_entropy" : [], 
-            "prediction_error" : [], "hidden_state" : [[] for _ in range(args.layers)]}
+            "prediction_error" : [], "hidden_state" : [[] for _ in range(self.args.layers)]}
         
         
         
-    def training(self, q):
-        
+    def training(self, q):        
         self.pred_episodes()
         self.pos_episodes()
         self.save_agent()
@@ -155,6 +154,7 @@ class Agent:
             no, ns = self.maze.obs()
             if(push): 
                 self.memory.push(o, s, a, r + wall_punishment, no, ns, done, done)
+        torch.cuda.empty_cache()
         return(a, hp, hq, r + wall_punishment, spot_name, done, action_name)
             
             
@@ -186,19 +186,20 @@ class Agent:
 
 
     def pos_episodes(self):
-        if(self.args.agents_per_pos_list != -1 and self.agent_num > self.args.agents_per_pos_list): return
-        pos_lists = []
-        for episode in range(self.args.episodes_in_pos_list):
-            done = False 
-            prev_action = torch.zeros((1, 1, 2))  
-            hq = [torch.zeros((1, 1, self.args.hidden_size))] * self.args.layers 
-            self.maze.begin()
-            pos_list = [self.maze_name, self.maze.maze.get_pos_yaw_spe()[0]]
-            for step in range(self.args.max_steps):
-                if(not done): prev_action, hp, hq, _, _, done, _ = self.step_in_episode(prev_action, hq, push = False, verbose = False)
-                pos_list.append(self.maze.maze.get_pos_yaw_spe()[0])
-            pos_lists.append(pos_list)
-        self.plot_dict["pos_lists"]["{}_{}_{}".format(self.agent_num, self.epochs, self.maze.name)] = pos_lists
+        with torch.no_grad():
+            if(self.args.agents_per_pos_list != -1 and self.agent_num > self.args.agents_per_pos_list): return
+            pos_lists = []
+            for episode in range(self.args.episodes_in_pos_list):
+                done = False 
+                prev_action = torch.zeros((1, 1, 2))  
+                hq = [torch.zeros((1, 1, self.args.hidden_size))] * self.args.layers 
+                self.maze.begin()
+                pos_list = [self.maze_name, self.maze.maze.get_pos_yaw_spe()[0]]
+                for step in range(self.args.max_steps):
+                    if(not done): prev_action, hp, hq, _, _, done, _ = self.step_in_episode(prev_action, hq, push = False, verbose = False)
+                    pos_list.append(self.maze.maze.get_pos_yaw_spe()[0])
+                pos_lists.append(pos_list)
+            self.plot_dict["pos_lists"]["{}_{}_{}".format(self.agent_num, self.epochs, self.maze.name)] = pos_lists
     
     
     
@@ -252,9 +253,9 @@ class Agent:
         self.epochs += 1
 
         rgbd, spe, actions, rewards, dones, masks = batch
-        actions = torch.cat([torch.zeros(actions[:,0].unsqueeze(1).shape), actions], dim = 1)    
-        all_masks = torch.cat([torch.ones(masks.shape[0], 1, 1), masks], dim = 1)   
-        episodes = rewards.shape[0] ; steps = rewards.shape[1] 
+        [rgbd, spe, actions, rewards, dones, masks] = attach_list([rgbd, spe, actions, rewards, dones, masks], self.args.device)
+        actions = torch.cat([torch.zeros(actions[:,0].unsqueeze(1).shape).to(self.args.device), actions], dim = 1)    
+        all_masks = torch.cat([torch.ones(masks.shape[0], 1, 1).to(self.args.device), masks], dim = 1)   
         
         #print("\n\n")
         #print("{}. rgbd: {}. spe: {}. actions: {}. rewards: {}. dones: {}. masks: {}.".format(
@@ -273,15 +274,13 @@ class Agent:
         zp_std_list = [torch.cat([zp_std[layer] for zp_std in zp_std_lists], dim = 1) for layer in range(self.args.layers)]
         zq_mu_list  = [torch.cat([zq_mu[layer]  for zq_mu  in zq_mu_lists],  dim = 1) for layer in range(self.args.layers)]
         zq_std_list = [torch.cat([zq_std[layer] for zq_std in zq_std_lists], dim = 1) for layer in range(self.args.layers)]
-                        
         pred_rgbd = torch.cat(zq_rgbd_pred_list,  dim = 1)
         pred_spe  = torch.cat(zq_speed_pred_list, dim = 1)
 
-        image_loss = F.binary_cross_entropy_with_logits(pred_rgbd, rgbd[:,1:], reduction = "none").mean((-1,-2,-3)).unsqueeze(-1) * masks # all_masks
-        speed_loss = self.args.speed_scalar * F.mse_loss(pred_spe, spe[:,1:],  reduction = "none").mean(-1).unsqueeze(-1) * masks # all_masks
+        image_loss = F.binary_cross_entropy_with_logits(pred_rgbd, rgbd[:,1:], reduction = "none").mean((-1,-2,-3)).unsqueeze(-1) * masks
+        speed_loss = self.args.speed_scalar * F.mse_loss(pred_spe, spe[:,1:],  reduction = "none").mean(-1).unsqueeze(-1) * masks
         accuracy_for_prediction_error = image_loss + speed_loss
         accuracy           = accuracy_for_prediction_error.mean()
-        #accuracy_for_prediction_error = accuracy_for_prediction_error[:,1:]
         
         complexity_for_hidden_state = [dkl(zq_mu, zq_std, zp_mu, zp_std).mean(-1).unsqueeze(-1) * all_masks for (zq_mu, zq_std, zp_mu, zp_std) in zip(zq_mu_list, zq_std_list, zp_mu_list, zp_std_list)]
         complexity          = sum([self.args.beta[layer] * complexity_for_hidden_state[layer].mean() for layer in range(self.args.layers)])       
@@ -292,6 +291,7 @@ class Agent:
         self.forward_opt.step()
         
         if(self.args.beta == 0): complexity = None
+        torch.cuda.empty_cache()
                         
                         
         
@@ -304,7 +304,7 @@ class Agent:
         hidden_state_curiosity = sum(hidden_state_curiosities)
         if(self.args.curiosity == "prediction_error"):  curiosity = prediction_error_curiosity
         elif(self.args.curiosity == "hidden_state"): curiosity = hidden_state_curiosity
-        else:                                curiosity = torch.zeros(rewards.shape)
+        else:                                curiosity = torch.zeros(rewards.shape).to(self.args.device)
         extrinsic = torch.mean(rewards).item()
         intrinsic_curiosity = curiosity.mean().item()
         rewards += curiosity
@@ -336,18 +336,20 @@ class Agent:
         
         self.soft_update(self.critic1, self.critic1_target, self.args.tau)
         self.soft_update(self.critic2, self.critic2_target, self.args.tau)
+        torch.cuda.empty_cache()
                         
         
         
         # Train alpha
         if self.args.alpha == None:
             _, log_pis, _ = self.actor(detach_list(h_list))
-            alpha_loss = -(self.log_alpha * (log_pis + self.target_entropy))*masks
+            alpha_loss = -(self.log_alpha.to(self.args.device) * (log_pis + self.target_entropy))*masks
             alpha_loss = alpha_loss.mean() / masks.mean()
             self.alpha_opt.zero_grad()
             alpha_loss.backward()
             self.alpha_opt.step()
-            self.alpha = torch.exp(self.log_alpha) 
+            self.alpha = torch.exp(self.log_alpha).to(self.args.device)
+            torch.cuda.empty_cache()
         else:
             alpha_loss = None
             
@@ -390,10 +392,9 @@ class Agent:
             if self.args.alpha == None: alpha = self.alpha 
             else:                       alpha = self.args.alpha
             new_actions, log_pis, _ = self.actor(detach_list(h_list))
-
             if self.args.action_prior == "normal":
-                loc = torch.zeros(action_size, dtype=torch.float64)
-                scale_tril = torch.tensor([[1, 0], [1, 1]], dtype=torch.float64)
+                loc = torch.zeros(action_size, dtype=torch.float64).to(self.args.device)
+                scale_tril = torch.tensor([[1, 0], [1, 1]], dtype=torch.float64).to(self.args.device)
                 policy_prior = MultivariateNormal(loc=loc, scale_tril=scale_tril)
                 policy_prior_log_prrgbd = policy_prior.log_prob(new_actions).unsqueeze(-1)
             elif self.args.action_prior == "uniform":
@@ -430,6 +431,9 @@ class Agent:
         prediction_error_curiosity = prediction_error_curiosity.mean().item()
         hidden_state_curiosities = [hidden_state_curiosity.mean().item() for hidden_state_curiosity in hidden_state_curiosities]
         hidden_state_curiosities = [hidden_state_curiosity for hidden_state_curiosity in hidden_state_curiosities]
+        
+        detach_list([rgbd, spe, actions, rewards, dones, masks])
+        torch.cuda.empty_cache()
         
         return(losses, extrinsic, intrinsic_curiosity, intrinsic_entropy, prediction_error_curiosity, hidden_state_curiosities)
     

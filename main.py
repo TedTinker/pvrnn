@@ -1,5 +1,8 @@
 #%%
 
+import os
+#os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
+
 import torch.multiprocessing as multiprocessing
 import pickle, torch, random
 import numpy as np
@@ -7,7 +10,7 @@ from torch.multiprocessing import Process, Queue
 from time import sleep 
 from math import floor
 
-from utils import args, folder, duration, estimate_total_duration, print
+from utils import args, folder, memory_usage, duration, estimate_total_duration, print, device
 
 print("\nname:\n{}".format(args.arg_name))
 print("\nagents: {}. previous_agents: {}.".format(args.agents, args.previous_agents))
@@ -19,7 +22,9 @@ from agent import Agent
 def train(q, i):
     seed = args.init_seed + i
     np.random.seed(seed) ; random.seed(seed) ; torch.manual_seed(seed) ; torch.cuda.manual_seed(seed)
-    # Also choose a GPU based on mod 4.
+    #if(args.comp == "saion"):
+    #    args.device = f'cuda:{i % 4}'
+    #memory_usage(args.device)
     agent = Agent(i, args)
     agent.training(q)
     with open(folder + "/plot_dict_{}.pickle".format(   str(i).zfill(3)), "wb") as handle:

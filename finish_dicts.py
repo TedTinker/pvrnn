@@ -64,6 +64,7 @@ for folder in folders:
         pickle.dump(min_max_dict, handle)
             
 for folder, plot_dict in plot_dicts.items():
+    print("Saving folder {}.".format(folder))
     with open(folder + "/plot_dict.pickle", "wb") as handle:
         pickle.dump(plot_dict, handle)
     
